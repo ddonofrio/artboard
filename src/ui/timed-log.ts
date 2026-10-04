@@ -1,4 +1,4 @@
-export interface Activity { kind: 'Tools' | 'Thinking'; text: string }
+export interface Activity { kind: 'Tools' | 'Thinking' | 'Error'; text: string }
 export type Schedule = (callback: () => void, delay: number) => () => void;
 const scheduleTimer: Schedule = (callback, delay) => {
   const timer = setTimeout(callback, delay);

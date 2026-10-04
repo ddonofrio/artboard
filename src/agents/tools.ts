@@ -54,7 +54,7 @@ function misplacedObjectField(args: Record<string, unknown>): string | undefined
 }
 
 /** Thin SDK adapters around the existing tool dispatcher, not a second tool runtime. */
-export function agentTools(host: SceneTools, sceneId: string, role: 'editor' | 'reviewer', signal: AbortSignal | undefined, onTool: (name: string, result: ToolResult, input: Record<string, unknown>) => void | Promise<void>, onDraft: (draft: DraftSubmission) => void, onReview: (review: Review) => void, submissionError: (revision: number) => string | undefined = () => undefined, requireHandoff = false): ToolSet {
+export function agentTools(host: SceneTools, sceneId: string, role: 'editor' | 'reviewer', signal: AbortSignal | undefined, onTool: (name: string, result: ToolResult, input: Record<string, unknown>) => void | Promise<void>, onDraft: (draft: DraftSubmission) => void, onReview: (review: Review) => void, submissionError: (revision: number) => string | undefined = () => undefined, requireHandoff = false, onStart: (name: string) => void | Promise<void> = () => {}, vision = true): ToolSet {
   const result: ToolSet = {};
   // Local models can return several calls despite parallel_tool_calls=false.
   // Serialize adapter executions, including presentation of each preview.
@@ -64,7 +64,7 @@ export function agentTools(host: SceneTools, sceneId: string, role: 'editor' | '
     pending = next.catch(() => {});
     return next;
   };
-  const names = role === 'editor' ? ['scene_catalog', 'scene_create', 'scene_inspect', 'scene_apply', 'scene_render', 'scene_history', 'scene_io'] : ['scene_catalog', 'scene_inspect'];
+  const names = (role === 'editor' ? ['scene_catalog', 'scene_create', 'scene_inspect', 'scene_apply', 'scene_render', 'scene_history', 'scene_io'] : ['scene_catalog', 'scene_inspect', 'scene_render']).filter(name => vision || name !== 'scene_render');
   for (const name of names) {
     const original = toolSchemas[name];
     // The full polymorphic object schema is large. Discovery supplies precise
@@ -84,9 +84,11 @@ export function agentTools(host: SceneTools, sceneId: string, role: 'editor' | '
       schema.required = ['scene_id', 'action', 'palette'];
     }
     result[name] = tool({
-      description: name === 'scene_create' ? 'Create an EMPTY drawing surface. Build scenery progressively with scene_apply. No recipes or prebuilt scenes.' : name === 'scene_io' ? 'Set an editable palette with action=palette. Other file operations are unavailable to agents.' : original.description,
+      description: name === 'scene_render' ? 'Look at the drawing on demand. The requested image is supplied once in your next model request; call again for another look. Supports the render options below.' : name === 'scene_create' ? 'Create an EMPTY drawing surface. Build scenery progressively with scene_apply. No recipes or prebuilt scenes.' : name === 'scene_io' ? 'Set an editable palette with action=palette. Other file operations are unavailable to agents.' : original.description,
       inputSchema: jsonSchema<Record<string, unknown>>(schema),
       execute: args => sequential(async () => {
+        signal?.throwIfAborted();
+        await onStart(name);
         signal?.throwIfAborted();
         let output: ToolResult;
         if (typeof args.scene_id === 'string' && /<\/?(?:parameter|function|tool_call)\b/.test(args.scene_id)) output = error(`Malformed tool arguments: XML tool tags are embedded in scene_id. Use one API function call with valid JSON arguments; scene_id must be exactly "${sceneId}". Do not place tool markup or another call inside a string.`);
@@ -101,10 +103,10 @@ export function agentTools(host: SceneTools, sceneId: string, role: 'editor' | '
         if (!output.ok && name === 'scene_apply') {
           output.error.message += ' Correct the rejected field and retry a small batch; no operations from this batch were applied. Polygon/line geometry uses points; circles use kind=ellipse with bounds. Color belongs inside object and must be a valid palette index. For generator/material parameters, consult scene_catalog with the relevant category and ID instead of repeating the same invalid call.';
         }
-        // Do not inject base64 as prose in tool messages. The host supplies the
-        // preview as a real image part in the editor's next model request.
-        if (name === 'scene_render' && output.ok) output = { ok: true, result: { ...output.result, image_ref: 'Current preview is attached to the next model request when vision is enabled.' } };
         await onTool(name, output, args);
+        // Only an explicit render requests vision. Keep bytes out of prose;
+        // orchestration attaches this exact render once as a real image part.
+        if (name === 'scene_render' && output.ok) output = { ok: true, result: { ...output.result, image_ref: 'Requested image supplied once in the next model request. Call scene_render again for another look.' } };
         return output;
       }),
     });
@@ -114,6 +116,8 @@ export function agentTools(host: SceneTools, sceneId: string, role: 'editor' | '
     description: role === 'editor' ? 'Submit only the completed drawing revision to the independent reviewer. No narrative or choices. Call alone, after edits.' : 'Approve this exact drawing revision or return minimal drawing corrections. Read-only; call alone.',
     inputSchema: jsonSchema<Record<string, unknown>>(role === 'editor' ? (requireHandoff ? stageSubmissionSchema : draftSubmissionSchema) : reviewSchema),
     execute: value => sequential(async () => {
+      signal?.throwIfAborted();
+      await onStart(name);
       signal?.throwIfAborted();
       const validator = role === 'editor' ? (requireHandoff ? validateStage : validateDraft) : validateReview;
       let output: ToolResult;

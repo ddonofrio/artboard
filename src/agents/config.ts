@@ -33,7 +33,8 @@ export function agentConfig(input: Partial<AgentConfig> = {}): AgentConfig {
   if (config.api_key !== undefined && (typeof config.api_key !== 'string' || config.api_key.length > 4096)) throw new Error('api_key must be a string.');
   return config;
 }
-export async function listModels(config: Pick<AgentConfig, 'base_url' | 'api_key'>, fetcher: typeof fetch = globalThis.fetch, signal?: AbortSignal): Promise<string[]> {
+export const isChatModelID = (id: string): boolean => !/embed|^bge|nomic-embed/i.test(id);
+export async function listModels(config: Pick<AgentConfig, 'base_url' | 'api_key'>, fetcher: typeof fetch = globalThis.fetch, signal?: AbortSignal, kind: 'chat' | 'all' = 'chat'): Promise<string[]> {
   const response = await fetcher(`${apiBaseURL(config.base_url)}/models`, {
     headers: config.api_key ? { Authorization: `Bearer ${config.api_key}` } : {},
     signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(10000)]) : AbortSignal.timeout(10000),
@@ -41,7 +42,7 @@ export async function listModels(config: Pick<AgentConfig, 'base_url' | 'api_key
   if (!response.ok) throw new Error(`Model discovery returned HTTP ${response.status}. Check endpoint and optional API key.`);
   const data: unknown = await response.json();
   if (!data || typeof data !== 'object' || !('data' in data) || !Array.isArray(data.data)) throw new Error('Expected OpenAI-compatible /models response.');
-  const models = data.data.filter((item): item is { id: string } => !!item && typeof item === 'object' && typeof item.id === 'string').map(item => item.id).filter(id => !/embed|^bge|nomic-embed/i.test(id));
-  if (!models.length) throw new Error('No chat models available. Load a tool-calling, vision-capable model in your server.');
+  const models = data.data.filter((item): item is { id: string } => !!item && typeof item === 'object' && typeof item.id === 'string').map(item => item.id).filter(id => id.trim() && id.length <= 256 && (kind === 'all' || isChatModelID(id)));
+  if (!models.length) throw new Error(kind === 'all' ? 'No models available. Load a model in your server.' : 'No chat models available. Load a tool-calling, vision-capable model in your server.');
   return [...new Set(models)];
 }

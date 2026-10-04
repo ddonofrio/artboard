@@ -37,7 +37,9 @@ Only rejected reviews trigger another edit phase. Fix their actionable issues; t
 The supplied review is your correction checklist. Apply each instruction to its object_id (or add the missing
 element when object_id is scene), then check the updated drawing against every item before calling finish_draft.
 Never resubmit a rejected drawing unchanged. Inspection, catalog discovery, and finish_draft do not correct it.
-Each request includes current_scene and, when vision is enabled, its current JPEG. They replace older scene snapshots.
+Each request includes current_scene JSON. Images are never supplied automatically.
+When vision_available is true, call scene_render at your discretion to look at the drawing. Its requested image
+is available only in the next model request; call again when you need another look. Use crop/scale options as needed.
 Compare the current drawing with your work plan before choosing the next tool. If a requested element is missing,
 hidden, misplaced, or contradicted by another element, continue editing. Object names alone do not prove it is drawn.
 Do not claim to see an image if none is supplied; in JSON-only mode check the actual geometry and layers.
@@ -48,14 +50,17 @@ because a few calls have succeeded or because a reviewer is available. Do not ex
 
 export const REVIEWER_INSTRUCTIONS = `You are the independent scene REVIEWER. You do not edit.
 Use the API's structured function calls with valid JSON arguments, never XML tags or function-call text.
-Evaluate the original user prompt against the exact provided draft: JPEG (if attached) and editable JSON. Do not review or request narrative text.
+Evaluate the original user prompt against the exact provided draft's image and editable JSON.
+With vision enabled, each review starts with the submitted draft image. That image is supplied once; previous revisions' images are removed.
+When vision_available is true, you may call scene_render for another look or a crop; its image is supplied once in the next model request.
+Do not review or request narrative text.
 You continue the same review conversation across revisions. On a follow-up review, compare the newest draft
-with each correction you requested in the preceding submit_review. Earlier images and tool results are history;
+with each correction you requested in the preceding submit_review. Earlier tool results are history; image bytes expire after one request;
 the newest user message supplies the current revision. Drop resolved issues and repeat only unresolved corrections.
 Compare each requested scene element with the drawing itself. A required element that is missing, hidden, or only present
 in an object name is a concrete defect: return its minimal correction (use object_id="scene" for a missing object).
 Check that the requested background is actually drawn and that scene objects are visible in appropriate layers.
-Your tools are read-only scene inspection/catalog plus submit_review. Do not call mutation tools.
+Your tools are read-only scene inspection/catalog/render plus submit_review. Do not call mutation tools.
 Keep the review brief: at most three concrete issues, each with a short correction. When the supplied draft is sufficient,
 call submit_review directly rather than spending steps on redundant inspection. Produce the tool call within the response budget.
 The intended style is low-resolution retro pixel art, with a limited palette, hard edges, simple procedural shapes,

@@ -18,7 +18,7 @@ export function mockModel() {
   const requests: ChatRequest[] = [];
   const fetcher: typeof fetch = async (input, init) => {
     init?.signal?.throwIfAborted();
-    if (String(input).endsWith('/models')) return Response.json({ data: [{ id: 'embedding-test' }, { id: 'test-model' }] });
+    if (String(input).endsWith('/models')) return Response.json({ data: [{ id: 'embedding-test' }, { id: 'test-model' }, { id: 'second-model' }] });
     const request = JSON.parse(String(init?.body)) as ChatRequest;
     requests.push(request);
     const context = requestContext(request);

@@ -10,7 +10,7 @@ for (const layers of [1, 2]) test(`real model completes a ${layers}-layer drawin
       const value = element.textContent || '';
       if (value && value !== 'None') void (window as unknown as { recordLiveLog: (entry: string) => Promise<void> }).recordLiveLog(value);
     };
-    for (const id of ['workflow-log', 'error-log']) {
+    for (const id of ['workflow-log', 'agent-state', 'activity-log']) {
       const element = document.getElementById(id)!;
       new MutationObserver(() => report(element)).observe(element, { childList: true, characterData: true, subtree: true });
     }
@@ -22,8 +22,9 @@ for (const layers of [1, 2]) test(`real model completes a ${layers}-layer drawin
   await page.getByRole('button', { name: 'Send' }).click();
   await expect.poll(async () => page.locator('#workflow-log').textContent(), { timeout: 280000 }).toMatch(/^(Approved|Incomplete|Review limit reached|Error)$/);
   const status = await page.locator('#workflow-log').textContent();
-  const error = await page.locator('#error-log').textContent();
+  const error = await page.locator('#activity-log').getAttribute('data-last-error');
   expect(status, `Real run failed: ${error}`).toBe('Approved');
+  await expect(page.locator('#agent-state')).toHaveText('idle');
   expect(failures).toEqual([]);
   expect(Number(await page.locator('.metrics dd').first().textContent())).toBeGreaterThan(0);
   expect(await page.locator('canvas').evaluate((canvas: HTMLCanvasElement) => canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height).data.some(value => value !== 0))).toBe(true);

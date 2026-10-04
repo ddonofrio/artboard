@@ -3,6 +3,7 @@ import { expect, test } from '@playwright/test';
 test.beforeEach(async ({ page, request }) => {
   await request.post('http://127.0.0.1:5189/reset');
   await page.goto('/');
+  await expect(page.getByRole('combobox', { name: 'Model' })).toBeEnabled();
 });
 
 for (let layers = 1; layers <= 6; layers++) test(`${layers}-layer workflow renders a drawing and corrects only with the final artist`, async ({ page, request }) => {
@@ -19,8 +20,27 @@ for (let layers = 1; layers <= 6; layers++) test(`${layers}-layer workflow rende
   const requests = await (await request.get('http://127.0.0.1:5189/requests')).json();
   const stages = new Set(requests.filter((item: { workflow?: unknown }) => item.workflow).map((item: { workflow: { stage_index: number } }) => item.workflow.stage_index));
   expect(stages.size).toBe(layers);
-  expect(requests.filter((item: { model: string; round: number }) => item.model !== 'reviewer-model' && item.round === 2).every((item: { workflow: { stage_index: number } }) => item.workflow.stage_index === layers)).toBe(true);
-  await expect(page.locator('#error-log')).toHaveText('None');
+  expect(requests.filter((item: { workflow?: unknown; round: number }) => item.workflow && item.round === 2).every((item: { workflow: { stage_index: number } }) => item.workflow.stage_index === layers)).toBe(true);
+  await expect(page.locator('#agent-state')).toHaveText('idle');
+});
+
+test('the model combo applies a selection to one Send operation and accepts a different model on the next turn', async ({ page, request }) => {
+  const model = page.getByRole('combobox', { name: 'Model' });
+  await expect(model.locator('option')).toHaveText(['embedding-test', 'test-model', 'second-model']);
+  await model.selectOption('second-model');
+  await page.locator('#layer-count').fill('2');
+  await page.getByRole('textbox', { name: 'Prompt' }).fill('First selected model');
+  const sent = page.waitForRequest(item => item.url().endsWith('/api/runs'));
+  await page.getByRole('button', { name: 'Send' }).click();
+  expect((await sent).postDataJSON().model).toBe('second-model');
+  await expect(page.locator('.status')).toHaveText('Approved');
+  await model.selectOption('test-model');
+  await page.getByRole('textbox', { name: 'Prompt' }).fill('Next selected model');
+  await page.getByRole('button', { name: 'Send' }).click();
+  await expect(page.locator('.status')).toHaveText('Approved');
+  const requests = await (await request.get('http://127.0.0.1:5189/requests')).json();
+  expect(requests.filter((item: { prompt: string }) => item.prompt === 'First selected model').every((item: { model: string }) => item.model === 'second-model')).toBe(true);
+  expect(requests.filter((item: { prompt: string }) => item.prompt === 'Next selected model').every((item: { model: string }) => item.model === 'test-model')).toBe(true);
 });
 
 test('batch input runs sequential drawings and edit uses the last retained scene', async ({ page, request }) => {
@@ -62,10 +82,10 @@ test('review exhaustion, incomplete results and errors are distinct and errors h
   await page.locator('#layer-count').fill('3');
   await prompt.fill('Scene [fail-after-background]'); await page.getByRole('button', { name: 'Send' }).click();
   await expect(page.locator('.status')).toHaveText('Incomplete');
-  await expect(page.locator('#error-log')).toContainText('Simulated model failure');
+  await expect(page.locator('#activity-log')).toHaveAttribute('data-last-error', /Simulated model failure/);
   await prompt.fill('Scene [fail]'); await page.getByRole('button', { name: 'Send' }).click();
   await expect(page.locator('.status')).toHaveText('Error');
-  await expect(page.locator('#error-log')).toContainText('Simulated model failure');
+  await expect(page.locator('#activity-log')).toHaveAttribute('data-last-error', /Simulated model failure/);
   await expect(page.getByRole('button', { name: 'Send' })).toBeEnabled();
 });
 
@@ -80,7 +100,7 @@ test('undefined workflows cannot start and editing requires a current drawing', 
   await page.locator('#layer-count').fill('1');
   await page.getByRole('checkbox', { name: 'Edit the current scene' }).check();
   await page.getByRole('button', { name: 'Send' }).click();
-  await expect(page.locator('#error-log')).toHaveText('Draw a scene before editing it.');
+  await expect(page.locator('#activity-log')).toContainText('Draw a scene before editing it.');
   expect(await (await request.get('http://127.0.0.1:5189/requests')).json()).toEqual([]);
 });
 
@@ -97,7 +117,7 @@ test('the three logs separate activity, workflow and errors; bursts hold each en
   expect(new Set(colors).size).toBe(1);
   await expect(page.locator('#activity-log')).toHaveAttribute('data-kind', 'thinking');
   await expect(page.locator('#activity-log')).toContainText('Inspect the requested scene');
-  await expect(page.locator('#error-log')).toHaveText('None');
+  await expect(page.locator('#agent-state')).toHaveText('idle');
   const clipping = await page.locator('#activity-log').evaluate(element => ({ height: element.getBoundingClientRect().height, clamp: getComputedStyle(element).webkitLineClamp, content: element.scrollHeight }));
   expect(clipping.height).toBeLessThanOrEqual(32); expect(clipping.clamp).toBe('2'); expect(clipping.content).toBeGreaterThan(clipping.height);
   await page.clock.runFor(999); await expect(page.locator('#activity-log')).toHaveAttribute('data-kind', 'thinking');
@@ -123,9 +143,10 @@ test('configuration is inaccessible from the browser and failures recover withou
   await page.getByRole('textbox', { name: 'Prompt' }).fill('Scene [invalid-handoff]');
   await page.getByRole('button', { name: 'Send' }).click();
   await expect(page.locator('.status')).toHaveText('Approved');
-  await expect(page.locator('#error-log')).toContainText('Invalid finish_draft');
+  await expect(page.locator('#activity-log')).toHaveAttribute('data-last-error', /Invalid finish_draft/);
   await page.getByRole('textbox', { name: 'Prompt' }).fill('Clean run');
   await page.getByRole('button', { name: 'Send' }).click();
   await expect(page.locator('.status')).toHaveText('Approved');
-  await expect(page.locator('#error-log')).toHaveText('None');
+  await expect(page.locator('#agent-state')).toHaveText('idle');
+  await expect(page.locator('#activity-log')).not.toHaveAttribute('data-last-error');
 });

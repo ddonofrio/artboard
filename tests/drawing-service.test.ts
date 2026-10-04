@@ -1,19 +1,20 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createServer } from 'node:http';
-import { copyFile, mkdir, mkdtemp, readFile, readdir } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { PNG } from 'pngjs';
 import { createDrawingService } from '../src/adapters/server/index';
 import type { DrawingEvent } from '../src/contracts/service';
 import { mockModel } from './fixtures/model';
 
-async function startService() {
+async function startService(options: { discovery?: typeof fetch; environment?: NodeJS.ProcessEnv } = {}) {
   await mkdir(resolve('.tmp'), { recursive: true });
   const root = await mkdtemp(resolve('.tmp', 'service-test-'));
   await copyFile(resolve('agents.example.json'), resolve(root, 'agents.example.json'));
   const model = mockModel();
-  const middleware = await createDrawingService({ root, fetch: model.fetcher, environment: { AGENT_EDITOR_MODEL: 'test-model', AGENT_API_KEY: 'server-only-key', AGENT_MAX_REVIEWS: '2' } });
+  const fetcher: typeof fetch = (input, init) => options.discovery && String(input).endsWith('/models') ? options.discovery(input, init) : model.fetcher(input, init);
+  const middleware = await createDrawingService({ root, fetch: fetcher, environment: { AGENT_EDITOR_MODEL: 'test-model', AGENT_API_KEY: 'server-only-key', AGENT_MAX_REVIEWS: '2', ...options.environment } });
   const server = createServer((request, response) => { void middleware(request, response, () => { response.writeHead(404); response.end(); }); });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   const address = server.address();
@@ -24,6 +25,50 @@ async function startService() {
   return { root, url, close, draw, model };
 }
 const events = (text: string): DrawingEvent[] => text.trim().split('\n').map(line => JSON.parse(line));
+test('model listing uses the configured v1 endpoint and private key without starting inference or exposing settings', async () => {
+  const calls: { url: string; authorization: string | null }[] = [];
+  const service = await startService({ environment: { AGENT_BASE_URL: 'http://models.test:9123/v1/', AGENT_EDITOR_MODEL: 'second-model' }, discovery: async (input, init) => {
+    calls.push({ url: String(input), authorization: new Headers(init?.headers).get('Authorization') });
+    return Response.json({ data: [{ id: 'embedding-test' }, { id: 'test-model' }, { id: 'second-model' }, { id: 'test-model' }] });
+  } });
+  try {
+    const response = await fetch(`${service.url}/api/models`), text = await response.text();
+    assert.equal(response.status, 200);
+    assert.deepEqual(JSON.parse(text), { models: ['embedding-test', 'test-model', 'second-model'], selected_model: 'second-model' });
+    assert.deepEqual(calls, [{ url: 'http://models.test:9123/v1/models', authorization: 'Bearer server-only-key' }]);
+    assert.ok(!text.includes('server-only-key') && !text.includes('models.test'));
+    assert.equal((await fetch(`${service.url}/api/models`, { method: 'POST' })).status, 405);
+    assert.equal((await fetch(`${service.url}/api/models`, { headers: { Origin: 'https://other.test' } })).status, 403);
+    assert.equal(calls.length, 1); assert.equal(service.model.requests.length, 0);
+  } finally { await service.close(); }
+});
+test('discovery failure is visible and a later refresh can recover', async () => {
+  let calls = 0;
+  const service = await startService({ discovery: async () => ++calls === 1 ? Response.json({ error: 'not ready' }, { status: 503 }) : Response.json({ data: [{ id: 'ready-model' }] }) });
+  try {
+    const failed = await fetch(`${service.url}/api/models`);
+    assert.equal(failed.status, 500); assert.match((await failed.json()).error, /HTTP 503/);
+    const recovered = await fetch(`${service.url}/api/models`);
+    assert.deepEqual(await recovered.json(), { models: ['ready-model'], selected_model: 'ready-model' });
+    assert.equal(service.model.requests.length, 0);
+  } finally { await service.close(); }
+});
+test('a selected model overrides every artist and reviewer only for its request and preserves local profiles', async () => {
+  const service = await startService();
+  try {
+    const path = resolve(service.root, 'agents.local.json');
+    const original = JSON.stringify({ connection: { reviewer_model: 'default-reviewer' }, agents: { background: { model: 'background-local', instructions: 'Keep request-specific selection separate.' }, main_content: { model: 'subject-local' }, reviewer: { model: 'reviewer-local' } } });
+    await writeFile(path, original);
+    const selected = events(await (await service.draw({ prompt: 'Selected run', layers: 2, model: 'second-model' })).text());
+    assert.ok(selected.at(-1)?.type === 'final');
+    assert.ok(service.model.requests.length > 0 && service.model.requests.every(request => request.model === 'second-model'));
+    assert.ok(service.model.requests.some(request => request.messages.some(message => typeof message.content === 'string' && message.content.includes('Keep request-specific selection separate.'))));
+    const count = service.model.requests.length;
+    await (await service.draw({ prompt: 'Default run', layers: 2 })).text();
+    assert.deepEqual(new Set(service.model.requests.slice(count).map(request => request.model)), new Set(['background-local', 'subject-local', 'reviewer-local']));
+    assert.equal(await readFile(path, 'utf8'), original);
+  } finally { await service.close(); }
+});
 test('separate tool calls from one model response share a queue; the next response uses a new queue', async () => {
   const service = await startService();
   try {
@@ -71,6 +116,13 @@ test('service streams stages, tools, images and reviews; saves and edits the ret
     assert.equal(items.filter(item => item.type === 'stage').length, 3);
     assert.equal(items.filter(item => item.type === 'review').length, 2);
     assert.ok(items.some(item => item.type === 'tool' && item.name === 'scene_apply' && Array.isArray(item.input.operations)));
+    const states = items.filter(item => item.type === 'state');
+    for (const state of ['processing_prompt', 'thinking', 'writing_tool_args', 'executing_tool', 'idle']) assert.ok(states.some(item => item.state === state), state);
+    assert.equal(states.at(-1)?.state, 'idle');
+    for (const [index, item] of items.entries()) if (item.type === 'tool') {
+      const previous = items.slice(0, index).filter(event => event.type === 'state').at(-1);
+      assert.ok(previous?.type === 'state' && previous.state === 'executing_tool' && previous.tool === item.name);
+    }
     const final = items.at(-1)!;
     assert.equal(final.type, 'final');
     if (final.type !== 'final') return;
@@ -96,6 +148,7 @@ test('service rejects malformed requests, undefined flows, missing bases and cro
   const service = await startService();
   try {
     for (const value of [null, {}, { prompt: ' ', layers: 1 }, { prompt: 'Scene', layers: 7 }, { prompt: 'x'.repeat(4001), layers: 1 }, { prompt: 'Scene', layers: 1, batch: { id: '../escape', index: 1 } }]) assert.equal((await service.draw(value)).status, 400);
+    for (const model of ['', ' ', 42, null, 'x'.repeat(257)]) assert.equal((await service.draw({ prompt: 'Scene', layers: 1, model })).status, 400);
     assert.equal((await service.draw({ prompt: 'Scene', layers: 1, scene_id: 'unknown' })).status, 404);
     assert.equal((await fetch(`${service.url}/api/runs`)).status, 405);
     assert.equal((await fetch(`${service.url}/api/runs`, { method: 'POST', headers: { Origin: 'https://other.test' }, body: '{}' })).status, 403);

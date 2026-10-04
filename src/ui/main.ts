@@ -12,6 +12,13 @@ app.innerHTML = `
           <textarea id="prompt" rows="4" maxlength="4000" placeholder="Describe the drawing…" aria-label="Prompt"></textarea>
           <button type="button" class="prompt-send" disabled>Send →</button>
         </div>
+        <div class="model-picker">
+          <label for="model-select">Model</label>
+          <div class="model-controls">
+            <div class="field-box" data-frame="single"><select id="model-select" disabled><option value="">Loading models...</option></select></div>
+            <button id="refresh-models" type="button" aria-label="Refresh models">Refresh</button>
+          </div>
+        </div>
         <label class="checkbox-row"><input type="checkbox" id="batch"><span class="check-glyph" aria-hidden="true"></span>Batch (one prompt per line)</label>
         <label class="checkbox-row"><input type="checkbox" id="use-base"><span class="check-glyph" aria-hidden="true"></span>Edit the current scene</label>
         <label class="layer-row" for="layer-count">Number of layers (1–9)<input id="layer-count" type="number" min="1" max="9" step="1" value="1" aria-label="Number of layers" aria-describedby="layer-algorithm"></label>
@@ -30,7 +37,7 @@ app.innerHTML = `
         <section class="box" data-frame="single" data-title="Real time log" aria-label="Real time log">
           <p id="activity-log" class="log-clamped" aria-live="polite">No tool calls yet.</p>
           <p id="workflow-log" class="status" aria-live="polite">Not started</p>
-          <p id="error-log" role="status">None</p>
+          <p id="agent-state" role="status">idle</p>
         </section>
       </div>
     </section>

@@ -1,4 +1,12 @@
-import type { DrawingEvent, DrawingRequest } from '../contracts/service';
+import type { DrawingEvent, DrawingRequest, ModelsResponse } from '../contracts/service';
+
+export async function fetchModels(signal: AbortSignal): Promise<ModelsResponse> {
+  const response = await fetch('/api/models', { signal });
+  const body = await response.json();
+  if (!response.ok) throw new Error(typeof body.error === 'string' ? body.error : `Model discovery returned HTTP ${response.status}.`);
+  if (!Array.isArray(body.models) || !body.models.length || !body.models.every((model: unknown) => typeof model === 'string' && model.trim() && model.length <= 256) || typeof body.selected_model !== 'string' || !body.models.includes(body.selected_model)) throw new Error('Invalid model list from the drawing service.');
+  return body as ModelsResponse;
+}
 
 export async function streamDrawing(request: DrawingRequest, signal: AbortSignal, onEvent: (event: DrawingEvent) => void | Promise<void>): Promise<void> {
   const response = await fetch('/api/runs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(request), signal });

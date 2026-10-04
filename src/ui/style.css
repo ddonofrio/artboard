@@ -77,7 +77,7 @@ textarea:focus, input:focus, select:focus { outline: 0; }
 .checkbox-row { display: flex; gap: 8px; align-items: flex-start; position: relative; cursor: pointer; }
 .layer-row { display: flex; align-items: center; gap: 8px; }
 .layer-algorithm { overflow-wrap: anywhere; }
-#activity-log, #workflow-log, #error-log { min-width: 0; overflow-wrap: anywhere; color: inherit; }
+#activity-log, #workflow-log, #agent-state { min-width: 0; overflow-wrap: anywhere; color: inherit; }
 .log-clamped { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; max-height: 32px; white-space: pre-wrap; }
 .layer-row input { width: 4ch; border-bottom: 1px solid #a9afb9; text-align: center; appearance: textfield; }
 .layer-row input::-webkit-inner-spin-button, .layer-row input::-webkit-outer-spin-button { appearance: none; margin: 0; }
@@ -94,6 +94,10 @@ details[open] > summary::before { content: '[-] '; }
 .settings-fields { display: grid; gap: 8px; padding-top: 16px; }
 .settings-fields .checkbox-row { margin: 8px 0; }
 .field-box { min-height: 48px; padding: 16px; }
+.model-picker { display: grid; gap: 8px; min-width: 0; }
+.model-controls { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; }
+.model-controls .field-box { min-width: 0; }
+.model-controls select { min-width: 0; text-overflow: ellipsis; }
 .field-box select { appearance: none; padding-right: 16px; }
 .field-box:has(select)::after { content: '▼'; position: absolute; right: 16px; top: 16px; pointer-events: none; color: #e7bb71; }
 .canvas-panel { align-self: start; padding: 16px 8px; }

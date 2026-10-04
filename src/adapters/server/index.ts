@@ -5,7 +5,9 @@ import { StringDecoder } from 'node:string_decoder';
 import { PixelRenderer, SceneStore, SceneTools, type Operation, type PixelImage, type Scene } from '../../core/index.js';
 import { runWorkflow, type WorkflowEvent } from '../../workflows/run.js';
 import { getWorkflow } from '../../contracts/workflows.js';
-import type { DrawingEvent, DrawingRequest } from '../../contracts/service.js';
+import { agentConfig, isChatModelID, listModels } from '../../agents/config.js';
+import { AGENT_ROLES } from '../../contracts/workflows.js';
+import type { DrawingEvent, DrawingRequest, ModelsResponse } from '../../contracts/service.js';
 import { NodeAdapter, OutputStore, validateBatchOutput, encodeJPEG, encodePNG } from '../node/index.js';
 import { ensureAgentConfig, loadWorkflowConfig } from './config.js';
 import { runPersistence } from './persistence.js';
@@ -23,12 +25,12 @@ export async function createDrawingService(options: DrawingServiceOptions) {
   const outputs = new OutputStore(resolve(options.root, 'outputs'), renderer);
   return async (request: IncomingMessage, response: ServerResponse, next: () => void) => {
     const url = new URL(request.url || '/', 'http://localhost');
-    if (url.pathname !== '/api/runs') { next(); return; }
+    if (!['/api/runs', '/api/models'].includes(url.pathname)) { next(); return; }
     const jsonError = (status: number, message: string) => {
       response.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
       response.end(JSON.stringify({ error: message }));
     };
-    if (request.method !== 'POST') { jsonError(405, 'Use POST to start a drawing.'); return; }
+    if (request.method !== (url.pathname === '/api/models' ? 'GET' : 'POST')) { jsonError(405, url.pathname === '/api/models' ? 'Use GET to list models.' : 'Use POST to start a drawing.'); return; }
     // The service is local; reject cross-origin requests before reading credentials or contacting a model.
     if (request.headers.origin && request.headers.origin !== `http://${request.headers.host}` && request.headers.origin !== `https://${request.headers.host}`) { jsonError(403, 'Cross-origin drawing requests are not allowed.'); return; }
     const controller = new AbortController();
@@ -37,6 +39,14 @@ export async function createDrawingService(options: DrawingServiceOptions) {
     let runId: string | undefined;
     let persistence: ReturnType<typeof runPersistence> | undefined;
     try {
+      if (url.pathname === '/api/models') {
+        const config = await loadWorkflowConfig(options.root, environment);
+        const models = await listModels(agentConfig(config.connection), options.fetch, controller.signal, 'all');
+        const preferred = config.agents?.artist?.model || config.connection?.editor_model;
+        const body: ModelsResponse = { models, selected_model: preferred && models.includes(preferred) ? preferred : models.find(isChatModelID) || models[0] };
+        response.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+        response.end(JSON.stringify(body)); return;
+      }
       let body = '';
       const decoder = new StringDecoder('utf8');
       let size = 0;
@@ -49,6 +59,7 @@ export async function createDrawingService(options: DrawingServiceOptions) {
       let input: DrawingRequest;
       try { input = JSON.parse(body); } catch { jsonError(400, 'Invalid drawing request JSON.'); return; }
       if (!input || typeof input.prompt !== 'string' || !input.prompt.trim() || input.prompt.length > 4000 || (input.scene_id !== undefined && typeof input.scene_id !== 'string')) { jsonError(400, 'Use a prompt of 1 to 4000 characters and an optional scene_id.'); return; }
+      if (input.model !== undefined && (typeof input.model !== 'string' || !input.model.trim() || input.model.length > 256)) { jsonError(400, 'Use a model ID of 1 to 256 characters.'); return; }
       try { getWorkflow(input.layers); } catch (error) { jsonError(400, (error as Error).message); return; }
       try { if (input.batch !== undefined) validateBatchOutput(input.batch); } catch (error) { jsonError(400, (error as Error).message); return; }
       const base = input.scene_id === undefined ? undefined : scenes.get(input.scene_id);
@@ -56,6 +67,12 @@ export async function createDrawingService(options: DrawingServiceOptions) {
       const id = randomUUID(); runId = id;
       await outputs.record(id, { type: 'start', request: input });
       const config = await loadWorkflowConfig(options.root, environment);
+      if (input.model !== undefined) {
+        const model = input.model.trim();
+        config.connection = { ...config.connection, editor_model: model, reviewer_model: model };
+        // This freshly loaded request configuration preserves prompts and never writes local settings.
+        config.agents = Object.fromEntries(AGENT_ROLES.map(role => [role, { ...config.agents?.[role], model }]));
+      }
       controller.signal.throwIfAborted();
       response.writeHead(200, { 'Content-Type': 'application/x-ndjson', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
       response.flushHeaders();
@@ -68,6 +85,7 @@ export async function createDrawingService(options: DrawingServiceOptions) {
         await persistence!.capture(event);
         if (event.type === 'stage') { emit({ type: 'stage', name: event.stage.name, index: event.index, total: event.total }); return; }
         const item = event.event;
+        if (item.type === 'state') emit({ type: 'state', state: item.state, tool: item.tool });
         if (item.type === 'phase') emit({ type: 'phase', role: item.role, round: item.round });
         if (item.type === 'response') responseNumber++;
         if (item.type === 'tool') {

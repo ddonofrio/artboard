@@ -3,6 +3,7 @@ import { expect, test } from '@playwright/test';
 test.beforeEach(async ({ page }) => {
   await page.goto('/');
   await page.evaluate(() => document.fonts.ready);
+  await expect(page.getByRole('combobox', { name: 'Model' })).toBeEnabled();
 });
 
 test('the approved shell has three columns and no removed controls', async ({ page }) => {
@@ -11,7 +12,11 @@ test('the approved shell has three columns and no removed controls', async ({ pa
   expect(await page.locator('.workspace > .panel').evaluateAll(panels => panels.map(panel => panel.getAttribute('data-title')))).toEqual(['PROMPT', 'CANVAS', 'MONITOR']);
   expect(await page.locator('[aria-label="Monitor"] [data-title]').evaluateAll(boxes => boxes.map(box => box.getAttribute('data-title')))).toEqual(['Stats', 'Real time log']);
   await expect(page.locator('[data-title="Agent actions"]')).toHaveCount(0);
-  await expect(page.locator('nav, [role="tab"], details, select, input[type="url"], input[type="file"]')).toHaveCount(0);
+  await expect(page.locator('#agent-state')).toHaveText('idle');
+  await expect(page.locator('#error-log')).toHaveCount(0);
+  await expect(page.locator('nav, [role="tab"], details, input[type="url"], input[type="file"]')).toHaveCount(0);
+  await expect(page.getByRole('combobox', { name: 'Model' })).toHaveCount(1);
+  expect(await page.locator('.input-box + .model-picker').count()).toBe(1);
   await expect(page.locator('[aria-label="Prompt"] [data-title]')).toHaveCount(0);
   expect(await page.locator('.prompt-panel .checkbox-row').allTextContents()).toEqual(['Batch (one prompt per line)', 'Edit the current scene']);
   await expect(page.locator('#layer-count')).toHaveAttribute('min', '1');

@@ -38,7 +38,8 @@ function simulatedServer(options: MockOptions = {}) {
     assert.equal(request.parallel_tool_calls, false);
     assert.equal(request.tool_choice, 'required');
     if (role === 'reviewer') {
-      assert.deepEqual(request.tools.map(tool => tool.function.name).sort(), ['scene_catalog', 'scene_inspect', 'submit_review']);
+      const names = request.tools.map(tool => tool.function.name).sort();
+      assert.deepEqual(names, names.includes('scene_render') ? ['scene_catalog', 'scene_inspect', 'scene_render', 'submit_review'] : ['scene_catalog', 'scene_inspect', 'submit_review']);
       if (options.failReview) return Response.json({ error: { message: 'Model does not support image inputs', type: 'invalid_request_error' } }, { status: 400 });
     }
     let name: string, args: Record<string, unknown>;
@@ -79,7 +80,7 @@ test('API config normalizes root/v1/custom paths and bounds loop settings', () =
   assert.throws(() => agentConfig({ max_reviews: 11 }), /max_reviews.*1 to 10/);
   assert.equal('max_steps' in agentConfig(), false);
 });
-test('AI SDK feeds rejected reviews back to the editor with actual JPEG parts and targeted edits', async () => {
+test('AI SDK feeds rejected reviews back to the editor without unsolicited images and with targeted edits', async () => {
   const tools = host(), fake = simulatedServer(), events: AgentEvent[] = [];
   const result = await runAgentLoop({ tools, prompt: 'A cave with a gate', config: { base_url: 'http://example.test:1234', editor_model: 'editor-vl', reviewer_model: 'reviewer-vl', max_reviews: 3 }, fetch: fake.fetcher, onEvent: event => events.push(event) });
   assert.deepEqual(events.filter(e => e.type === 'phase').map(e => e.type === 'phase' ? `${e.role}:${e.round}` : ''), ['editor:1','reviewer:1','editor:2','reviewer:2','editor:3','reviewer:3']);
@@ -93,17 +94,15 @@ test('AI SDK feeds rejected reviews back to the editor with actual JPEG parts an
   assert.equal(reviewerCalls.length, 3);
   const editRequest = fake.requests.filter(request => request.model === 'editor-vl')[3];
   const editContent = editRequest.messages.find(message => message.role === 'user')!.content;
-  assert.ok(Array.isArray(editContent));
-  const editContext = JSON.parse(editContent.find(part => part.type === 'text')!.text!);
+  assert.equal(typeof editContent, 'string');
+  const editContext = JSON.parse(editContent as string);
   assert.deepEqual(editContext.review, result.reviews[0]);
   assert.equal(editContext.task, 'Edit the drawing to address the independent review.');
   assert.equal(editContext.max_reviews, 3);
-  for (const request of reviewerCalls) {
-    const content = request.messages.find(message => message.role === 'user')!.content;
-    assert.ok(Array.isArray(content));
-    const jpg = content.find(part => part.type === 'image_url')!.image_url!.url;
-    assert.ok(jpg.startsWith('data:image/jpeg;base64,'));
-    assert.ok(Buffer.from(jpg.split(',')[1], 'base64').subarray(0,3).equals(Buffer.from([255,216,255])));
+  assert.ok(fake.requests.filter(request => request.model === 'editor-vl').every(request => !JSON.stringify(request.messages).includes('data:image/')));
+  for (const [index, request] of reviewerCalls.entries()) {
+    const images = request.messages.flatMap(message => Array.isArray(message.content) ? message.content.filter(part => part.type === 'image_url') : []);
+    assert.deepEqual(images.map(part => part.image_url!.url), [result.drafts[index].preview.image_ref]);
   }
   for (const url of fake.urls) assert.ok(url.startsWith('http://example.test:1234/v1/chat/completions'));
   assert.deepEqual(events.filter(e => e.type === 'connection').map(e => e.type === 'connection' ? e.models : undefined), [undefined, { editor: 'editor-vl', reviewer: 'reviewer-vl' }]);
@@ -134,7 +133,8 @@ test('AI SDK feeds rejected reviews back to the editor with actual JPEG parts an
   assert.ok(previews.every(e => e.scene.revision === e.preview.revision && e.preview.image_ref.startsWith('data:image/jpeg;base64,')));
   const prompts = events.filter(e => e.type === 'prompt');
   assert.equal(prompts.length,fake.requests.length);
-  assert.ok(prompts.some(e => e.role === 'reviewer' && e.content.includes('image/jpeg attached; binary omitted')));
+  assert.ok(prompts.filter(e => e.role === 'editor').every(e => !e.content.includes('attached; binary omitted')));
+  assert.ok(prompts.some(e => e.role === 'reviewer' && e.content.includes('attached; binary omitted')));
   assert.ok(prompts.every(e => !e.content.includes('data:image/jpeg;base64,')));
   const edit = events.find(e => e.type === 'tool' && e.name === 'scene_apply');
   assert.ok(edit?.type === 'tool' && Array.isArray(edit.input.operations) && edit.output.ok);
@@ -220,13 +220,13 @@ test('editor receives fresh snapshots and the reviewer retains its prior convers
   const revisions: number[] = [];
   for (const request of requests.slice(1)) {
     const content = request.messages.filter(message => message.role === 'user').at(-1)!.content;
-    assert.ok(Array.isArray(content));
-    const context = JSON.parse(content.find(part => part.type === 'text')!.text!);
+    assert.equal(typeof content, 'string');
+    const context = JSON.parse(content as string);
     const scene = context.current_scene as Scene;
     revisions.push(scene.revision);
     const images = request.messages.flatMap(message => Array.isArray(message.content) ? message.content.filter(part => part.type === 'image_url') : []);
-    assert.equal(images.length, 1, 'Only the latest frame reaches the editor');
-    assert.equal(images[0].image_url!.url, `data:image/jpeg;base64,${encodeJPEG(tools.renderer.render(scene)).toString('base64')}`);
+    assert.equal(images.length, 0, 'Scene JSON refreshes without automatic image input');
+    assert.equal(context.image_attached, false);
   }
   const reviewerCalls = fake.requests.filter(request => request.model === 'reviewer-vl');
   for (const [index, request] of reviewerCalls.entries()) {
@@ -235,6 +235,9 @@ test('editor receives fresh snapshots and the reviewer retains its prior convers
     const content = users.at(-1)!.content;
     assert.ok(Array.isArray(content));
     const context = JSON.parse(content.find(part => part.type === 'text')!.text!);
+    assert.equal(context.image_attached, true);
+    assert.deepEqual(content.filter(part => part.type === 'image_url').map(part => part.image_url!.url), [result.drafts[index].preview.image_ref]);
+    assert.ok(users.slice(0, -1).every(message => typeof message.content === 'string'), 'Earlier review images are removed');
     assert.equal(context.draft.scene.revision, result.drafts[index].scene.revision);
     assert.deepEqual(context.previous_review, result.reviews[index - 1] ?? null);
     const submissions = request.messages.flatMap(message => message.tool_calls ?? []).filter(call => call.function.name === 'submit_review');
@@ -360,7 +363,7 @@ test('loop detector reinjects context after four repeated adapter or SDK failure
   }
 });
 
-test('recovery preserves successful calls and supplies the current scene and JPEG after repeated edit failures', async () => {
+test('recovery preserves successful calls and supplies current scene JSON without injecting images', async () => {
   const fake = simulatedServer({ approveAll: true }), tools = host();
   let calls = 0;
   const result = await runAgentLoop({ tools, prompt: 'Cave', config: { editor_model: 'vl' }, fetch: async (input, init) => {
@@ -372,11 +375,11 @@ test('recovery preserves successful calls and supplies the current scene and JPE
       const recovery = JSON.parse(users[0].content as string);
       assert.deepEqual(recovery.tool_calls.map((call: { ok: boolean }) => call.ok), [true, true, false, false, false, false]);
       const content = users.at(-1)!.content;
-      assert.ok(Array.isArray(content));
-      const context = JSON.parse(content.find(part => part.type === 'text')!.text!);
+      assert.equal(typeof content, 'string');
+      const context = JSON.parse(content as string);
       assert.deepEqual(context.current_scene, tools.store.get('artboard'));
       assert.equal(context.current_scene.revision, 1);
-      assert.ok(content.some(part => part.type === 'image_url'));
+      assert.ok(!JSON.stringify(request.messages).includes('data:image/'));
       assert.equal(request.messages.filter(message => message.role === 'assistant' || message.role === 'tool').length, 0);
     }
     return fake.fetcher(input, init);
@@ -510,6 +513,7 @@ test('explicit JSON-only mode omits image inputs', async () => {
   const result=await runAgentLoop({tools:host(),prompt:'Cave',config:{editor_model:'text',vision:false},fetch:fake.fetcher});
   assert.ok(result.approved);
   assert.ok(fake.requests.every(r=>r.messages.every(m=>!Array.isArray(m.content) || !m.content.some(p=>p.type==='image_url'))));
+  assert.ok(fake.requests.every(request => !request.tools.some(tool => tool.function.name === 'scene_render')));
 });
 test('cancellation prevents final delivery, including agents that keep calling tools; occupied draft hosts are rejected', async () => {
   const controller=new AbortController(),fake=simulatedServer(),events:AgentEvent[]=[];

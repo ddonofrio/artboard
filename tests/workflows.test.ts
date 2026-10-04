@@ -34,7 +34,8 @@ for (let layers = 1; layers <= 6; layers++) test(`${layers} layers preserve hand
     assert.equal(context.workflow!.history.length, index);
     if (index) {
       assert.ok(context.current_scene!.objects.length >= index);
-      assert.ok(Array.isArray(first.messages.find(item => item.role === 'user')!.content));
+      assert.equal(typeof first.messages.find(item => item.role === 'user')!.content, 'string');
+      assert.ok(!JSON.stringify(first.messages).includes('data:image/'));
       assert.deepEqual(context.workflow!.previous, context.workflow!.history.at(-1));
     }
   }
