@@ -226,7 +226,7 @@ export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunRe
       const round = activeRound;
       if (name === 'scene_render' && result.ok && config.vision) requestedImages[role].push({ image_ref: String(result.result.image_ref), revision: Number(result.result.revision) });
       if (!result.ok) { rejectedTools++; lastToolError = result.error.message; }
-      else if (name === 'scene_apply') edits++;
+      else if (name === 'scene_apply' || name === 'scene_history') edits++;
       // Every completed tool exposes the current drawing, including inspection
       // and failed edits. Catalog discovery can happen before a scene exists.
       let scene: Scene | undefined;
@@ -235,7 +235,7 @@ export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunRe
       let changedPixels = 0;
       if (scene) {
         const image = host.renderer.render(scene);
-        const color = scene.palette.colors[0];
+        const color = scene.palette.colors[scene.palette.colors.length - 1];
         const blank = [1,3,5].map(start => parseInt(color.slice(start, start + 2), 16));
         for (let offset = 0; offset < image.data.length; offset += 4) {
           if (image.data[offset] !== (lastImage?.data[offset] ?? blank[0]) || image.data[offset + 1] !== (lastImage?.data[offset + 1] ?? blank[1]) || image.data[offset + 2] !== (lastImage?.data[offset + 2] ?? blank[2])) changedPixels++;
@@ -295,8 +295,10 @@ export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunRe
     emit({ type: 'phase', role: 'editor', round });
     let submission: DraftSubmission | undefined;
     let preparedRevision: number | undefined;
+    let lastViewedRevision: number | undefined;
     const pendingReview = reviews.at(-1);
     const editorTools = agentTools(host, sceneId, 'editor', options.signal, reportTool('editor'), value => { submission = value; }, () => {}, revision => {
+      if (config.vision && edits > 0 && lastViewedRevision !== revision) return `Revision ${revision} has edits the model has not visually checked. Call scene_render alone, inspect the image in the next response, and submit that unchanged revision.`;
       if (revision !== preparedRevision) return 'The drawing changed within this response. Check its updated JSON in the next model request, or call scene_render for visual inspection, before calling finish_draft alone. Complete every requested element before submitting.';
       if (pendingReview && (revision === pendingReview.revision || !correctionApplied)) return `The reviewer rejected revision ${pendingReview.revision}. Apply visible corrections with scene_apply before calling finish_draft. Pending corrections: ${JSON.stringify(pendingReview.issues)}`;
     }, !!options.stage, toolStarted('editor'), config.vision, options.review !== false);
@@ -316,6 +318,7 @@ export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunRe
           throw new Error('The prepared canvas is unavailable. Start a new drawing with a fresh scene host.');
         }
         const previews = requestedImages.editor.splice(0);
+        if (previews.length) lastViewedRevision = previews.at(-1)!.revision;
         const context = JSON.stringify(namedColors({ ...JSON.parse(text), current_scene: current, image_attached: previews.length > 0 }));
         const currentMessage = phaseMessages(context, previews)[0];
         // Append new state instead of rewriting the cached conversation prefix.

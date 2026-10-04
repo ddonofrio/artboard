@@ -115,5 +115,5 @@ test('sprites respect anchor, transparency and nearest palette colors', () => {
   store.apply('sprite',[{op:'add',object:{id:'sprite_obj',kind:'sprite',asset:'test',bounds:[8,8,4,2],layer:1}}]);
   const image = renderer.render(store.get('sprite'));
   assert.deepEqual([...image.data.slice((8*32+6)*4,(8*32+6)*4+3)],[255,255,255]);
-  assert.deepEqual([...image.data.slice((8*32+8)*4,(8*32+8)*4+3)],[0,0,0]);
+  assert.deepEqual([...image.data.slice((8*32+8)*4,(8*32+8)*4+3)],[255,255,255]);
 });

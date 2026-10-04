@@ -599,7 +599,7 @@ test('editor receives missing-background advice in actual tool messages; dark pa
   await runAgentLoop({ tools: host(), prompt: 'Background and gate', config: { editor_model: 'vl' }, fetch: fake.fetcher });
   const creation = JSON.parse(fake.requests[1].messages.filter(message => message.role === 'tool').at(-1)!.content as string);
   assert.equal(creation.result.feedback.unpainted_pixels, 640 * 480);
-  assert.match(creation.result.feedback.instructions.join(' '), /Fill the missing background/);
+  assert.match(creation.result.feedback.instructions.join(' '), /default white canvas/);
   const painted = JSON.parse(fake.requests[2].messages.filter(message => message.role === 'tool').at(-1)!.content as string);
   assert.equal(painted.result.feedback.unpainted_pixels, 0);
   const tools = host();

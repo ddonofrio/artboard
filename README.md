@@ -22,6 +22,8 @@ The agent decides what to draw and how to compose it. Artboard provides the mean
 
 All drawings use one fixed set of 16 basic colors. Agents choose colors by English names, including red and white, without interpreting color codes or selecting a palette.
 
+An empty canvas renders white. Drawing agents can add stars directly, including five-point stars for flags.
+
 Its intended external integration surface is **MCP (Model Context Protocol)**, allowing the Adventure engine and other compatible agents to use its drawing capabilities. MCP transport remains under development. The current implementation exposes the toolkit as a TypeScript library, a Node CLI and a local browser interface for drawing workflows.
 
 ## For Humans
@@ -34,7 +36,7 @@ The intended look is deliberately retro: low-resolution scenes, clear silhouette
 
 Artboard is being developed around simple, composable drawing tools:
 
-- Draw circles, rectangles, triangles, and lines.
+- Draw circles, rectangles, triangles, stars, and lines.
 - Fill areas and apply colours.
 - Position and combine primitives to build a scene.
 - Draw on a canvas through MCP.

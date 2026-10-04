@@ -23,13 +23,16 @@ const objectVariants = sceneObjectSchema.oneOf as { properties: Record<string, R
 const drawingProperties = {
   ...objectVariants[0].properties,
   color: { ...namedColorSchema, description: 'Interior fill color for shapes; stroke color for lines.' },
-  outline: { ...namedColorSchema, description: 'Draw a continuous border around the entire rectangle, polygon or ellipse in this color, in addition to its interior fill.' },
+  outline: { ...namedColorSchema, description: 'Draw a continuous border around the entire rectangle, polygon, ellipse or star in this color, in addition to its interior fill.' },
   stroke_width: { ...objectVariants[0].properties.stroke_width, description: 'Line or outline thickness in pixels; defaults to 1.' },
-  kind: { type: 'string', enum: ['circle', 'rect', 'rectangle', 'polygon', 'ellipse', 'line', 'procedural', 'sprite'] },
+  kind: { type: 'string', enum: ['circle', 'rect', 'rectangle', 'polygon', 'ellipse', 'star', 'line', 'procedural', 'sprite'] },
   points: { anyOf: [objectVariants[1].properties.points, objectVariants[2].properties.bounds], description: 'Polygon/line vertices. For ellipse, procedural or sprite, also accepts bounding corners or [x,y,width,height].' },
   bounds: { ...objectVariants[2].properties.bounds, description: '[x,y,width,height], measured from the top-left of the canvas.' },
-  center: { ...pointSchema, description: 'Circle/ellipse center [x,y], in canvas pixels.' },
-  radius: { ...number(0.5, 2048), description: 'Circle radius in pixels.' },
+  center: { ...pointSchema, description: 'Circle/ellipse/star center [x,y], in canvas pixels.' },
+  radius: { ...number(0.5, 2048), description: 'Circle radius or star outer radius in pixels.' },
+  tips: { ...objectVariants[4].properties.tips, description: 'Star tip count; defaults to 5, as on the USA flag.' },
+  inner_radius: { ...objectVariants[4].properties.inner_radius, description: 'Star notch radius in pixels, smaller than radius; defaults to about 0.382 times radius.' },
+  rotation: { ...objectVariants[4].properties.rotation, description: 'Star clockwise rotation in degrees; 0 (default) puts a tip straight up.' },
   rect: { ...objectVariants[2].properties.bounds, description: 'Rectangle/ellipse [x,y,width,height]. Width and height are dimensions in pixels.' },
   xy: { anyOf: [objectVariants[1].properties.points, { type: 'array', items: number(-4096, 4096), minItems: 4, maxItems: 4 }], description: 'Pillow-style corners for ellipse/rectangle (inclusive endpoints), or polygon/line vertices.' },
   bbox: { anyOf: [objectVariants[1].properties.points, { type: 'array', items: number(-4096, 4096), minItems: 4, maxItems: 4 }], description: 'Bounding corners [x0,y0,x1,y1] or [[x0,y0],[x1,y1]], with exclusive far edges.' },
@@ -43,7 +46,7 @@ const drawingProperties = {
   material: objectSchema({ id: { type: 'string', enum: Object.keys(materials) }, params: { type: 'object', additionalProperties: true } }, ['id']),
 };
 const drawingSchema = objectSchema(drawingProperties, ['id', 'kind']);
-drawingSchema.description = 'Circle: center and radius. Rectangle: rect or x,y,width,height. Ellipse: bounds or xy. Polygon/line: points. For a frame, use the full shape dimensions with outline and stroke_width. Example: {"id":"frame","kind":"rect","rect":[100,100,440,290],"fill":"light gray","outline":"dark gray","stroke_width":2}. Coordinates start at the top-left; colors use the fixed English names; layer defaults to 0, higher layers paint on top.';
+drawingSchema.description = 'Circle: center and radius. Star: center and radius, with 5 tips by default; example: {"id":"star1","kind":"star","center":[50,50],"radius":10,"fill":"white"}. Rectangle: rect or x,y,width,height. Ellipse: bounds or xy. Polygon/line: points. For a frame, use the full shape dimensions with outline and stroke_width. Example: {"id":"frame","kind":"rect","rect":[100,100,440,290],"fill":"light gray","outline":"dark gray","stroke_width":2}. Coordinates start at the top-left; colors use the fixed English names; layer defaults to 0, higher layers paint on top.';
 const operationsSchema = structuredClone((toolSchemas.scene_apply.inputSchema.properties as Record<string, Record<string, unknown>>).operations);
 const operationVariants = (operationsSchema.items as { oneOf: { properties: Record<string, unknown> }[] }).oneOf;
 operationVariants[0].properties.object = drawingSchema;
@@ -55,7 +58,7 @@ export function toolUsage(name: string): string {
   const usage: Record<string, string> = {
     scene_catalog: 'Use category=palettes/materials/objects/assets and optionally id for one entry.',
     scene_inspect: 'Use the supplied scene_id; omit ids for a summary or pass existing object IDs in ids.',
-    scene_apply: `Use operations=[{op:"add",object:{id,kind,...}},{op:"update",id,changes:{...}}]. Circle: center:[x,y],radius; ellipse: bounds:[x,y,width,height] or points with bounding corners; rectangle: kind:"rect",rect:[x,y,width,height]; polygon: points with at least 3 [x,y] vertices; line: at least 2. Frames use the full shape dimensions with fill, outline and stroke_width in pixels. Coordinates start at the top-left. Colors: ${COLOR_NAMES.join(', ')}. The failed batch was not applied.`,
+    scene_apply: `Use operations=[{op:"add",object:{id,kind,...}},{op:"update",id,changes:{...}}]. Circle/star: center:[x,y],radius; stars default to 5 tips, optional inner_radius must be smaller than radius and rotation is clockwise degrees. Ellipse: bounds:[x,y,width,height] or points with bounding corners; rectangle: kind:"rect",rect:[x,y,width,height]; polygon: points with at least 3 [x,y] vertices; line: at least 2. Frames use the full shape dimensions with fill, outline and stroke_width in pixels. Coordinates start at the top-left. Colors: ${COLOR_NAMES.join(', ')}. The failed batch was not applied.`,
     scene_render: 'Call alone with the supplied scene_id; optional crop=[x,y,width,height] must fit the canvas and scale is an integer 1-4.',
     scene_history: 'Use action="undo" or "redo" and steps=1..64, no more than the available history.',
     scene_io: 'The 16 colors are fixed. Choose an English color name in scene_apply.',
@@ -118,7 +121,7 @@ export function agentTools(host: SceneTools, sceneId: string, role: 'editor' | '
         else if (name === 'scene_catalog' && args.category === 'palettes') output = args.id && args.id !== 'basic'
           ? error('There is only one fixed set of 16 colors. Use category=palettes without an ID, or id=basic.')
           : { ok: true, result: { colors: [...COLOR_NAMES] } };
-        else if (name === 'scene_catalog' && (!args.category || args.category === 'tools')) output = { ok: true, result: { message: 'The 16 English color names are fixed. Query category=materials, objects, or assets and a single ID for details. Primitive kinds: polygon, ellipse, line; procedural kinds use the objects catalog.', categories: ['palettes', 'materials', 'objects', 'assets'] } };
+        else if (name === 'scene_catalog' && (!args.category || args.category === 'tools')) output = { ok: true, result: { message: 'The 16 English color names are fixed. Query category=materials, objects, or assets and a single ID for details. Primitive kinds: circle, rect, polygon, ellipse, star, line; procedural kinds use the objects catalog.', categories: ['palettes', 'materials', 'objects', 'assets'] } };
         else if (name === 'scene_apply' && misplacedObjectField(args)) output = error(misplacedObjectField(args)!);
         else {
           appliedInput = name === 'scene_apply' ? normalizeGeometry(args, host) : args;

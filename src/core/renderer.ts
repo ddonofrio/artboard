@@ -34,7 +34,8 @@ export class PixelRenderer {
     validateScene(scene);
     if (scene.renderer_version !== RENDERER_VERSION) fail('RENDERER_VERSION', `Expected renderer ${RENDERER_VERSION}, received ${scene.renderer_version}`, 'renderer_version');
     const width = scene.width, height = scene.height;
-    const pixels = new Uint8Array(width * height);
+    // Empty pixels use white so a blank canvas already has the common paper/flag field.
+    const pixels = new Uint8Array(width * height).fill(scene.palette.colors.length - 1);
     const plot = (x: number, y: number, color: number) => { if (x >= 0 && y >= 0 && x < width && y < height) pixels[y * width + x] = Math.min(color, scene.palette.colors.length - 1); };
     const line = (a: Point, b: Point, color: number, thickness: number) => {
       let x = Math.round(a[0]), y = Math.round(a[1]);
@@ -51,6 +52,16 @@ export class PixelRenderer {
     };
     const draw = (obj: SceneObject) => {
       if (obj.kind === 'procedural') { for (const part of expandGenerator({ ...obj, seed: obj.seed ?? idSeed(scene.seed, obj.id) })) draw(part); return; }
+      if (obj.kind === 'star') {
+        const tips = obj.tips ?? 5, inner = obj.inner_radius ?? obj.radius * (3 - Math.sqrt(5)) / 2;
+        const start = ((obj.rotation ?? 0) - 90) * Math.PI / 180;
+        const points: Point[] = Array.from({ length: tips * 2 }, (_, i) => {
+          const angle = start + i * Math.PI / tips, radius = i % 2 ? inner : obj.radius;
+          return [obj.center[0] + Math.cos(angle) * radius, obj.center[1] + Math.sin(angle) * radius];
+        });
+        draw({ ...obj, kind: 'polygon', points });
+        return;
+      }
       if (obj.kind === 'sprite') {
         const asset = this.assets.get(obj.asset);
         if (!asset) fail('MISSING_ASSET', `Register sprite asset ${obj.asset} before rendering`, `objects/${obj.id}/asset`);

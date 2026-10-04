@@ -6,7 +6,7 @@ function uncoveredPixels(host: SceneTools, scene: Scene): number | undefined {
   const geometry: SceneObject[] = [];
   const add = (object: SceneObject) => {
     if (object.kind === 'procedural') { expandGenerator(object).forEach(add); return; }
-    geometry.push({ ...object, id: `coverage_${geometry.length}`, color: 15, outline: object.outline === undefined ? undefined : 15, material: undefined });
+    geometry.push({ ...object, id: `coverage_${geometry.length}`, color: 0, outline: object.outline === undefined ? undefined : 0, material: undefined });
   };
   scene.objects.forEach(add);
   // A procedural scene can expand beyond the stored-object limit. Coverage is
@@ -15,7 +15,9 @@ function uncoveredPixels(host: SceneTools, scene: Scene): number | undefined {
   const mask: Scene = { ...scene, palette: BASIC_PALETTE, objects: geometry };
   const image = host.renderer.render(mask);
   let uncovered = 0;
-  for (let index = 0; index < image.data.length; index += 4) if (image.data[index] === 0) uncovered++;
+  for (let index = 0; index < image.data.length; index += 4) {
+    if (image.data[index] === 255 && image.data[index + 1] === 255 && image.data[index + 2] === 255) uncovered++;
+  }
   return uncovered;
 }
 
@@ -23,14 +25,14 @@ export function drawingFeedback(host: SceneTools, scene: Scene, changedPixels: n
   const uncovered = uncoveredPixels(host, scene);
   const instructions: string[] = [];
   if (changedPixels === 0 && affectedIds.length) instructions.push('The edit changed no visible pixels. Check the affected objects\' layers, geometry and colors.');
-  if (uncovered !== undefined && uncovered > 0) instructions.push(`Fill the missing background if required by the request; ${uncovered} pixels have no painted object.`);
+  if (uncovered !== undefined && uncovered > 0) instructions.push(`${uncovered} pixels show the default white canvas. Add a background object there only if the request needs a different color or texture.`);
   return {
     changed_pixels: changedPixels,
     ...(uncovered === undefined ? {} : { unpainted_pixels: uncovered }),
     instructions,
     suggested_actions: instructions.length ? [
       ...(changedPixels === 0 && affectedIds.length ? [{ tool: 'scene_inspect', arguments: { scene_id: scene.id, ids: affectedIds }, purpose: 'Check the invisible edit.' }] : []),
-      ...(uncovered ? [{ tool: 'scene_apply', purpose: 'Paint any requested background behind the existing objects.' }] : []),
+      ...(uncovered ? [{ tool: 'scene_apply', purpose: 'Paint a background only when the request needs a color or texture other than white.' }] : []),
       ...(changedPixels === 0 && affectedIds.length ? [
         { tool: 'scene_apply', purpose: 'Use reorder to correct occlusion, or update geometry or palette color.' },
       ] : []),

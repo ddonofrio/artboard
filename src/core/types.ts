@@ -19,9 +19,10 @@ export interface ObjectBase {
 export interface PolygonObject extends ObjectBase { kind: 'polygon'; points: Point[]; mapping?: { quad: Point[]; size: Point } }
 export interface LineObject extends ObjectBase { kind: 'line'; points: Point[] }
 export interface EllipseObject extends ObjectBase { kind: 'ellipse'; bounds: Bounds }
+export interface StarObject extends ObjectBase { kind: 'star'; center: Point; radius: number; tips?: number; inner_radius?: number; rotation?: number }
 export interface ProceduralObject extends ObjectBase { kind: 'procedural'; generator: GeneratorId; bounds: Bounds; params?: Params }
 export interface SpriteObject extends ObjectBase { kind: 'sprite'; asset: string; bounds: Bounds }
-export type SceneObject = PolygonObject | LineObject | EllipseObject | ProceduralObject | SpriteObject;
+export type SceneObject = PolygonObject | LineObject | EllipseObject | StarObject | ProceduralObject | SpriteObject;
 export interface Scene {
   version: 1;
   renderer_version: string;

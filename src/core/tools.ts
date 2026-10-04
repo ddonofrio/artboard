@@ -8,7 +8,7 @@ const usage: Record<string, string> = {
   scene_catalog: 'Query category=palettes/materials/objects/recipes/assets/tools, optionally with an id from that category.',
   scene_create: 'Pass scene_id and optional width,height,palette,seed; use an unused scene_id.',
   scene_inspect: 'Pass scene_id and optionally ids:[existingObjectId,...]; omit ids for a summary.',
-  scene_apply: 'Pass scene_id and operations:[{op:"add",object:{id,kind,layer,...}},{op:"update",id,changes:{...}}]. Ellipse uses bounds:[x,y,width,height]; polygon uses at least 3 [x,y] points; line uses at least 2. Use existing IDs for update/remove/reorder and valid palette indices. Failed batches are not applied.',
+  scene_apply: 'Pass scene_id and operations:[{op:"add",object:{id,kind,layer,...}},{op:"update",id,changes:{...}}]. Ellipse uses bounds:[x,y,width,height]; star uses center:[x,y],radius with optional tips, inner_radius smaller than radius, and clockwise rotation in degrees; polygon uses at least 3 [x,y] points; line uses at least 2. Use existing IDs for update/remove/reorder and valid palette indices. Failed batches are not applied.',
   scene_render: 'Pass scene_id; crop:[x,y,width,height] must fit the canvas and scale must be an integer 1-4.',
   scene_history: 'Pass scene_id, action:"undo"/"redo", and steps=1..64 within available history.',
   scene_io: 'Pass scene_id and action:"palette" with palette, or action:"save"/"load"/"export" with an adapter-scoped filename. Load can also receive scene JSON.',

@@ -3150,6 +3150,630 @@
                 "maximum": 24
               },
               "kind": {
+                "const": "star"
+              },
+              "center": {
+                "type": "array",
+                "items": {
+                  "type": "number",
+                  "minimum": -4096,
+                  "maximum": 4096
+                },
+                "minItems": 2,
+                "maxItems": 2
+              },
+              "radius": {
+                "type": "number",
+                "minimum": 0.5,
+                "maximum": 2048
+              },
+              "tips": {
+                "type": "integer",
+                "minimum": 3,
+                "maximum": 32,
+                "default": 5
+              },
+              "inner_radius": {
+                "type": "number",
+                "minimum": 0.01,
+                "maximum": 2048
+              },
+              "rotation": {
+                "type": "number",
+                "minimum": -360,
+                "maximum": 360,
+                "default": 0
+              }
+            },
+            "required": [
+              "id",
+              "kind",
+              "layer",
+              "center",
+              "radius"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[a-zA-Z][a-zA-Z0-9_-]{0,63}$"
+              },
+              "layer": {
+                "type": "integer",
+                "minimum": -1000,
+                "maximum": 1000
+              },
+              "seed": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 4294967295
+              },
+              "tags": {
+                "type": "array",
+                "maxItems": 16,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "maxLength": 80
+                }
+              },
+              "material": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "const": "stone"
+                      },
+                      "params": {
+                        "type": "object",
+                        "properties": {
+                          "scale": {
+                            "type": "number",
+                            "minimum": 0.5,
+                            "maximum": 8,
+                            "default": 1
+                          },
+                          "density": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1,
+                            "default": 0.35
+                          },
+                          "foreground": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 15
+                          },
+                          "background": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 15
+                          },
+                          "seed": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 4294967295
+                          },
+                          "irregularity": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1,
+                            "default": 0.7
+                          },
+                          "dark_edges": {
+                            "type": "boolean",
+                            "default": true
+                          }
+                        },
+                        "required": [],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "id"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "const": "masonry"
+                      },
+                      "params": {
+                        "type": "object",
+                        "properties": {
+                          "scale": {
+                            "type": "number",
+                            "minimum": 0.5,
+                            "maximum": 8,
+                            "default": 1
+                          },
+                          "density": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1,
+                            "default": 0.35
+                          },
+                          "foreground": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 15
+                          },
+                          "background": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 15
+                          },
+                          "seed": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 4294967295
+                          },
+                          "irregularity": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1,
+                            "default": 0.35
+                          },
+                          "mortar": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 4,
+                            "default": 1
+                          }
+                        },
+                        "required": [],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "id"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "const": "wood"
+                      },
+                      "params": {
+                        "type": "object",
+                        "properties": {
+                          "scale": {
+                            "type": "number",
+                            "minimum": 0.5,
+                            "maximum": 8,
+                            "default": 1
+                          },
+                          "density": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1,
+                            "default": 0.35
+                          },
+                          "foreground": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 15
+                          },
+                          "background": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 15
+                          },
+                          "seed": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 4294967295
+                          },
+                          "direction": {
+                            "type": "string",
+                            "enum": [
+                              "vertical",
+                              "horizontal"
+                            ],
+                            "default": "vertical"
+                          },
+                          "irregularity": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1,
+                            "default": 0.4
+                          }
+                        },
+                        "required": [],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "id"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "const": "plaster"
+                      },
+                      "params": {
+                        "type": "object",
+                        "properties": {
+                          "scale": {
+                            "type": "number",
+                            "minimum": 0.5,
+                            "maximum": 8,
+                            "default": 1
+                          },
+                          "density": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1,
+                            "default": 0.35
+                          },
+                          "foreground": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 15
+                          },
+                          "background": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 15
+                          },
+                          "seed": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 4294967295
+                          },
+                          "cracks": {
+                            "type": "boolean",
+                            "default": false
+                          }
+                        },
+                        "required": [],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "id"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "const": "tiles"
+                      },
+                      "params": {
+                        "type": "object",
+                        "properties": {
+                          "scale": {
+                            "type": "number",
+                            "minimum": 0.5,
+                            "maximum": 8,
+                            "default": 1
+                          },
+                          "density": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1,
+                            "default": 0.35
+                          },
+                          "foreground": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 15
+                          },
+                          "background": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 15
+                          },
+                          "seed": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 4294967295
+                          },
+                          "grout": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 4,
+                            "default": 1
+                          },
+                          "variant": {
+                            "type": "string",
+                            "enum": [
+                              "square",
+                              "rectangular"
+                            ],
+                            "default": "square"
+                          }
+                        },
+                        "required": [],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "id"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "const": "earth"
+                      },
+                      "params": {
+                        "type": "object",
+                        "properties": {
+                          "scale": {
+                            "type": "number",
+                            "minimum": 0.5,
+                            "maximum": 8,
+                            "default": 1
+                          },
+                          "density": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1,
+                            "default": 0.35
+                          },
+                          "foreground": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 15
+                          },
+                          "background": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 15
+                          },
+                          "seed": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 4294967295
+                          }
+                        },
+                        "required": [],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "id"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "const": "vegetation"
+                      },
+                      "params": {
+                        "type": "object",
+                        "properties": {
+                          "scale": {
+                            "type": "number",
+                            "minimum": 0.5,
+                            "maximum": 8,
+                            "default": 1
+                          },
+                          "density": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1,
+                            "default": 0.35
+                          },
+                          "foreground": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 15
+                          },
+                          "background": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 15
+                          },
+                          "seed": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 4294967295
+                          },
+                          "variant": {
+                            "type": "string",
+                            "enum": [
+                              "grass",
+                              "leaves"
+                            ],
+                            "default": "grass"
+                          }
+                        },
+                        "required": [],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "id"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "const": "water"
+                      },
+                      "params": {
+                        "type": "object",
+                        "properties": {
+                          "scale": {
+                            "type": "number",
+                            "minimum": 0.5,
+                            "maximum": 8,
+                            "default": 1
+                          },
+                          "density": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1,
+                            "default": 0.35
+                          },
+                          "foreground": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 15
+                          },
+                          "background": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 15
+                          },
+                          "seed": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 4294967295
+                          }
+                        },
+                        "required": [],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "id"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "const": "sky"
+                      },
+                      "params": {
+                        "type": "object",
+                        "properties": {
+                          "scale": {
+                            "type": "number",
+                            "minimum": 0.5,
+                            "maximum": 8,
+                            "default": 1
+                          },
+                          "density": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1,
+                            "default": 0.35
+                          },
+                          "foreground": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 15
+                          },
+                          "background": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 15
+                          },
+                          "seed": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 4294967295
+                          },
+                          "variant": {
+                            "type": "string",
+                            "enum": [
+                              "flat",
+                              "dither"
+                            ],
+                            "default": "dither"
+                          }
+                        },
+                        "required": [],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "id"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "const": "metal"
+                      },
+                      "params": {
+                        "type": "object",
+                        "properties": {
+                          "scale": {
+                            "type": "number",
+                            "minimum": 0.5,
+                            "maximum": 8,
+                            "default": 1
+                          },
+                          "density": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1,
+                            "default": 0.35
+                          },
+                          "foreground": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 15
+                          },
+                          "background": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 15
+                          },
+                          "seed": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 4294967295
+                          },
+                          "wear": {
+                            "type": "boolean",
+                            "default": true
+                          }
+                        },
+                        "required": [],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "id"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              },
+              "color": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 15
+              },
+              "outline": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 15
+              },
+              "stroke_width": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 24
+              },
+              "kind": {
                 "const": "procedural"
               },
               "bounds": {

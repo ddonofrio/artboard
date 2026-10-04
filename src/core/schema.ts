@@ -13,6 +13,7 @@ export const sceneObjectSchema: Schema = { oneOf: [
   objectSchema({ ...base, kind: { const: 'line' }, points }, ['id', 'kind', 'layer', 'points']),
   objectSchema({ ...base, kind: { const: 'ellipse' }, bounds: boundsSchema }, ['id', 'kind', 'layer', 'bounds']),
   objectSchema({ ...base, kind: { const: 'sprite' }, bounds: boundsSchema, asset: id }, ['id', 'kind', 'layer', 'bounds', 'asset']),
+  objectSchema({ ...base, kind: { const: 'star' }, center: pointSchema, radius: number(0.5, 2048), tips: integer(3, 32, 5), inner_radius: number(0.01, 2048), rotation: number(-360, 360, 0) }, ['id', 'kind', 'layer', 'center', 'radius']),
   ...Object.entries(generators).map(([key, entry]) => objectSchema({ ...base, kind: { const: 'procedural' }, bounds: boundsSchema, generator: { const: key }, params: objectSchema(entry.parameters) }, ['id', 'kind', 'layer', 'bounds', 'generator'])),
 ] };
 export const sceneSchema = {
@@ -22,7 +23,7 @@ export const sceneSchema = {
 };
 const operationSchema = { oneOf: [
   objectSchema({ op: { const: 'add' }, object: sceneObjectSchema }, ['op', 'object']),
-  objectSchema({ op: { const: 'update' }, id, changes: { type: 'object', minProperties: 1, maxProperties: 16, propertyNames: { enum: ['layer', 'seed', 'tags', 'material', 'color', 'outline', 'stroke_width', 'points', 'bounds', 'mapping', 'params'] } } }, ['op', 'id', 'changes']),
+  objectSchema({ op: { const: 'update' }, id, changes: { type: 'object', minProperties: 1, maxProperties: 16, propertyNames: { enum: ['layer', 'seed', 'tags', 'material', 'color', 'outline', 'stroke_width', 'points', 'bounds', 'mapping', 'params', 'center', 'radius', 'tips', 'inner_radius', 'rotation'] } } }, ['op', 'id', 'changes']),
   objectSchema({ op: { const: 'remove' }, id }, ['op', 'id']),
   { ...objectSchema({ op: { const: 'reorder' }, id, layer: integer(-1000, 1000), position: integer(0, 511) }, ['op', 'id']), anyOf: [{ required: ['layer'] }, { required: ['position'] }] },
 ] };
@@ -66,12 +67,19 @@ export function validateTool(tool: string, args: unknown): void {
   if (!validator) fail('UNKNOWN_TOOL', `Unknown tool: ${tool}`, 'tool');
   schemaCheck(validator, args, 'arguments');
 }
-export function validateObject(value: unknown): asserts value is SceneObject { schemaCheck(validateObjectJSON, value, 'object'); }
+function validateGeometry(object: SceneObject, field: string): void {
+  if (object.kind === 'star' && object.inner_radius !== undefined && object.inner_radius >= object.radius) fail('INVALID_STAR', 'Star inner_radius must be smaller than radius', `${field}/inner_radius`);
+}
+export function validateObject(value: unknown): asserts value is SceneObject {
+  schemaCheck(validateObjectJSON, value, 'object');
+  validateGeometry(value as SceneObject, 'object');
+}
 export function validateScene(value: unknown): asserts value is Scene {
   schemaCheck(validateSceneJSON, value, 'scene');
   const scene = value as Scene;
   const ids = new Set<string>();
   for (const obj of scene.objects) {
+    validateGeometry(obj, `objects/${obj.id}`);
     if (ids.has(obj.id)) fail('DUPLICATE_ID', `Duplicate object ID: ${obj.id}`, `objects/${obj.id}/id`);
     ids.add(obj.id);
     for (const [key, color] of Object.entries({ color: obj.color, outline: obj.outline, foreground: obj.material?.params?.foreground, background: obj.material?.params?.background, darkness: obj.kind === 'procedural' ? obj.params?.darkness : undefined, metal_color: obj.kind === 'procedural' ? obj.params?.metal_color : undefined, highlight_color: obj.kind === 'procedural' ? obj.params?.highlight_color : undefined })) {
