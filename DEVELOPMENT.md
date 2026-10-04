@@ -37,6 +37,8 @@ Build creates the static browser application in `dist` and independent ESM libra
 
 ## Drawing agents
 
+The fixed basic palette is shared by all workflows. Model context and drawing tools expose English color names; numeric indices and RGB values stay with rendering and persisted scene data. Agents cannot select or replace palettes. Tests exercise named colors through actual SDK requests, catalog discovery, inspection, edits and review, and verify that model requests contain no hexadecimal color codes.
+
 The browser service and Node command share `agents.local.json`. The template contains empty connection settings and empty model/instruction fields for every role. Unset values use localhost, model discovery and built-in role prompts. Existing local configuration is never overwritten, is excluded from Git and is denied through Vite file serving. Changes apply on the next request. `ARTBOARD_CONFIG_FILE` selects an alternate file.
 
 The browser's Model combo below the prompt lists the configured server's advertised IDs through `GET /api/models`. Model choices are saved in browser `localStorage` and restored on reload when still available; otherwise the server's preferred model is used. Refresh reloads the list. Each Send applies the chosen model to all creation/review agents for that execution (and every line of that batch), retaining private instructions without modifying configuration. The next Send captures the current selection again. Discovery failures appear in the activity log and can be retried. Model discovery does not start inference.

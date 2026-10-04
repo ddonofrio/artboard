@@ -20,6 +20,8 @@ Artboard is a drawing toolkit for composing scenes with the visual character of 
 
 The agent decides what to draw and how to compose it. Artboard provides the means to put that composition on a canvas.
 
+All drawings use one fixed set of 16 basic colors. Agents choose colors by English names, including red and white, without interpreting color codes or selecting a palette.
+
 Its intended external integration surface is **MCP (Model Context Protocol)**, allowing the Adventure engine and other compatible agents to use its drawing capabilities. MCP transport remains under development. The current implementation exposes the toolkit as a TypeScript library, a Node CLI and a local browser interface for drawing workflows.
 
 ## For Humans

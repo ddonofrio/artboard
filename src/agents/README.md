@@ -1,5 +1,9 @@
 # Drawing agents
 
+Every drawing uses the same 16 basic colors. Model requests, tool schemas, catalog replies and inspected objects use English color names only. Agents submit names for fills, outlines, material colors and generator colors; the adapter translates them to stored indices before atomic core validation. Palette selection and replacement are unavailable to agents. Existing drawing inputs adopt the fixed palette when an agent run starts. Exact RGB values remain inside renderer and persistence data.
+
+Primitive tool descriptions distinguish interior fill from a continuous outline. Frames use the full shape dimensions with `outline` and `stroke_width` in pixels; the rectangle schema includes a filled frame example. `rect` always means `[x,y,width,height]`.
+
 The agent adapter tolerates `points` in place of `bounds` for ellipses, procedural objects and sprites, on creation and updates. A flat `[x,y,width,height]` is used directly; two or more `[x,y]` points define the bounding box. Explicit `bounds` take precedence. Normalization happens before core validation, preserves the original call arguments in the journal, and stores canonical geometry. Invalid geometry still rejects the entire batch.
 
 This layer owns the drawing editor/reviewer workflow using AI SDK and the OpenAI-compatible provider. It imports the drawing core and exposes configuration, scoped tools, progress events, and orchestration through `artboard/agents`. It has no UI, filesystem, or Vite dependency.

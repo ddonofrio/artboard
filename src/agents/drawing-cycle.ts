@@ -1,5 +1,5 @@
 /** Drawing cadence shared by the standalone editor and workflow artists. */
-export const DRAWING_CYCLE = `The canvas is ready; use its supplied dimensions and palette.
+export const DRAWING_CYCLE = `The canvas is ready; use its dimensions and 16 named colors. Pick the closest basic color.
 Use the latest current_scene as the drawing's current state.
 Plan the commands for your assigned work.
 Execute the complete drawing block with consecutive scene_apply calls.

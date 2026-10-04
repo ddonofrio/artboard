@@ -1,4 +1,5 @@
 export * from './types.js';
+export * from './colors.js';
 export * from './catalog.js';
 export * from './schema.js';
 export * from './materials.js';

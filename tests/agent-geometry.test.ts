@@ -10,7 +10,7 @@ function setup() {
   });
   host.store.create({ scene_id: 'drawing' });
   const tools = agentTools(host, 'drawing', 'editor', undefined, () => {}, () => {}, () => {});
-  const apply = async (operations: unknown[]) => await tools.scene_apply.execute!({ scene_id: 'drawing', operations }, { toolCallId: 'call', messages: [] }) as ToolResult;
+  const apply = async (operations: unknown[]) => await tools.scene_apply.execute!({ scene_id: 'drawing', operations }, { toolCallId: 'call', messages: [], context: undefined }) as ToolResult;
   return { host, apply };
 }
 
@@ -37,7 +37,7 @@ for (const geometry of ellipses) test(`natural ellipse geometry: ${JSON.stringif
   assert.equal('points' in object, false);
   assert.deepEqual(input, original, 'Normalization preserves the original model arguments');
   const image = new PixelRenderer().render(host.store.get('drawing')), offset = (30 * image.width + 20) * 4;
-  assert.deepEqual([...image.data.slice(offset, offset + 3)], [200,217,182]);
+  assert.deepEqual([...image.data.slice(offset, offset + 3)], [255,255,85]);
 });
 
 test('rectangles, Pillow corner boxes and ordinary polygons coexist in one atomic batch', async () => {

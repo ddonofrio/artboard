@@ -19,9 +19,9 @@ for (let layers = 2; layers <= 7; layers++) test(`workflow ${layers} renders a d
   expect(Number(values[3])).toBe(1);
   expect(await page.locator('canvas').evaluate((canvas: HTMLCanvasElement) => canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height).data.some(value => value !== 0))).toBe(true);
   const requests = await (await request.get('http://127.0.0.1:5189/requests')).json();
-  const stages = new Set(requests.filter((item: { workflow?: unknown }) => item.workflow).map((item: { workflow: { stage_index: number } }) => item.workflow.stage_index));
+  const stages = new Set(requests.filter((item: { workflow?: unknown }) => item.workflow).map((item: { workflow: { stage_index?: number } }) => item.workflow.stage_index ?? 1));
   expect(stages.size).toBe(layers - 1);
-  expect(requests.filter((item: { workflow?: unknown; round: number }) => item.workflow && item.round === 2).every((item: { workflow: { stage_index: number } }) => item.workflow.stage_index === layers - 1)).toBe(true);
+  expect(requests.filter((item: { workflow?: unknown; round: number }) => item.workflow && item.round === 2).every((item: { workflow: { stage_index?: number } }) => (item.workflow.stage_index ?? 1) === layers - 1)).toBe(true);
   await expect(page.locator('#agent-state')).toHaveText('idle');
 });
 
@@ -63,7 +63,8 @@ test('workflow 1 completes without reviewer requests', async ({ page, request })
   await page.getByRole('button', { name: 'Send' }).click();
   await expect(page.locator('.status')).toHaveText('Completed');
   const requests = await (await request.get('http://127.0.0.1:5189/requests')).json();
-  expect(requests.every((item: { workflow?: { review_enabled: boolean } }) => item.workflow?.review_enabled === false)).toBe(true);
+  expect(requests.length).toBeGreaterThan(0);
+  expect(requests.every((item: { tools: string[] }) => !item.tools.includes('submit_review'))).toBe(true);
 });
 
 test('reasoning and image size controls are captured per turn and reasoning survives reload', async ({ page }) => {
@@ -192,16 +193,20 @@ test('the three logs separate activity, workflow and errors; bursts hold each en
   expect(clipping.top + clipping.visible).toBeGreaterThanOrEqual(clipping.content - 1);
   await page.clock.runFor(999); await expect(page.locator('#activity-log')).toHaveAttribute('data-kind', 'thinking');
   await page.clock.runFor(1); await expect(page.locator('#activity-log')).toHaveAttribute('data-kind', 'tools');
-  await expect(page.locator('#activity-log')).toContainText('scene_create');
-  await expect(page.locator('#activity-log')).toContainText('"width":64');
-  await page.clock.runFor(999); await expect(page.locator('#activity-log')).toContainText('scene_create');
+  await expect(page.locator('#activity-log')).toContainText('scene_apply');
+  await expect(page.locator('#activity-log')).toContainText('"color":"red"');
+  await page.clock.runFor(999); await expect(page.locator('#activity-log')).toContainText('scene_apply');
   await page.clock.runFor(1); await expect(page.locator('#activity-log')).toHaveAttribute('data-kind', 'thinking');
   await page.getByRole('textbox', { name: 'Prompt' }).fill('A later run');
   await page.getByRole('button', { name: 'Send' }).click();
   await expect(page.locator('.status')).toHaveText('Approved');
   await expect(page.locator('#activity-log')).toHaveAttribute('data-kind', 'thinking');
   await page.clock.runFor(999); await expect(page.locator('#activity-log')).toHaveAttribute('data-kind', 'thinking');
-  await page.clock.runFor(1); await expect(page.locator('#activity-log')).toContainText('scene_apply');
+  await page.clock.runFor(1); await expect(page.locator('#activity-log')).toContainText('finish_draft');
+  await page.clock.runFor(999); await expect(page.locator('#activity-log')).toContainText('finish_draft');
+  await page.clock.runFor(1); await expect(page.locator('#activity-log')).toHaveAttribute('data-kind', 'thinking');
+  await page.clock.runFor(1000); await expect(page.locator('#activity-log')).toContainText('submit_review');
+  await page.clock.runFor(1000); await expect(page.locator('#activity-log')).toContainText('scene_apply');
 });
 
 test('configuration is inaccessible from the browser and failures recover without mixing logs', async ({ page, request }) => {

@@ -1,4 +1,5 @@
 import type { Bounds, SceneObject, SceneTools } from '../core/index.js';
+import { indexedColors } from './colors.js';
 
 const finite = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
 const vector = (value: unknown, length: number): value is number[] => Array.isArray(value) && value.length === length && value.every(finite);
@@ -61,7 +62,7 @@ function normalizeObject(object: Record<string, unknown>, existing?: SceneObject
 
 /** Translate familiar drawing arguments before the canonical, atomic core edit. */
 export function normalizeGeometry(args: Record<string, unknown>, host: SceneTools): Record<string, unknown> {
-  const normalized = structuredClone(args);
+  const normalized = indexedColors(args) as Record<string, unknown>;
   if (!Array.isArray(normalized.operations)) return normalized;
   const objects = new Map<string, SceneObject>();
   if (normalized.operations.some(operation => operation?.op === 'update')) {

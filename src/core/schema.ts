@@ -1,10 +1,11 @@
 import Ajv from 'ajv';
 import { boundsSchema, choice, generators, integer, materials, number, objectSchema, palettes, pointSchema, recipes, type Schema } from './catalog.js';
 import type { Scene, SceneObject, ToolError } from './types.js';
+import { BASIC_PALETTE } from './colors.js';
 
 const id = { type: 'string', pattern: '^[a-zA-Z][a-zA-Z0-9_-]{0,63}$' };
 const points = { type: 'array', items: pointSchema, minItems: 2, maxItems: 256 };
-export const paletteSchema = objectSchema({ id, name: { type: 'string', minLength: 1, maxLength: 80 }, colors: { type: 'array', minItems: 1, maxItems: 16, items: { type: 'string', pattern: '^#[0-9a-fA-F]{6}$' } } }, ['id', 'name', 'colors']);
+export const paletteSchema = objectSchema({ id: { const: BASIC_PALETTE.id }, name: { const: BASIC_PALETTE.name }, colors: { const: BASIC_PALETTE.colors } }, ['id', 'name', 'colors']);
 const materialSchema = { oneOf: Object.entries(materials).map(([key, entry]) => objectSchema({ id: { const: key }, params: objectSchema(entry.parameters) }, ['id'])) };
 const base = { id, layer: integer(-1000, 1000), seed: integer(0, 4294967295), tags: { type: 'array', maxItems: 16, uniqueItems: true, items: { type: 'string', maxLength: 80 } }, material: materialSchema, color: integer(0, 15), outline: integer(0, 15), stroke_width: integer(1, 24) };
 export const sceneObjectSchema: Schema = { oneOf: [

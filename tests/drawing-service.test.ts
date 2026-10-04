@@ -200,9 +200,9 @@ test('service sends nested figures separately in one response queue with radial 
     if (!frames.every(item => item.type === 'preview')) return;
     assert.ok(frames[0].group && frames.every(frame => frame.group === frames[0].group));
     assert.deepEqual(frames.map(frame => frame.style?.kind), ['scanline', 'scanline', 'rays']);
-    assert.deepEqual(frames[2].style, { kind: 'rays', center: [0.5, 0.5], radius: [0.125, 1 / 6] });
+    assert.deepEqual(frames[2].style, { kind: 'rays', center: [0.05, 0.05], radius: [0.0125, 1 / 60] });
     const pixels = frames.map(frame => PNG.sync.read(Buffer.from(frame.image.split(',')[1], 'base64')));
-    const center = (24 * 64 + 32) * 4;
+    const center = (24 * 640 + 32) * 4;
     assert.notDeepEqual(pixels[0].data.slice(center, center + 4), pixels[1].data.slice(center, center + 4));
     assert.notDeepEqual(pixels[1].data.slice(center, center + 4), pixels[2].data.slice(center, center + 4));
     const final = items.at(-1)!;

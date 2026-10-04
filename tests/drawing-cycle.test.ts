@@ -4,7 +4,8 @@ import { runAgentLoop, type AgentEvent } from '../src/agents/loop';
 import { runWorkflow } from '../src/workflows/run';
 import { PixelRenderer, SceneStore, SceneTools, type PixelImage } from '../src/core/index';
 import { NodeAdapter, encodeJPEG } from '../src/adapters/node/index';
-import { requestContext, type ChatRequest } from './fixtures/model';
+import { requestContext, sceneFromModel, type ChatRequest } from './fixtures/model';
+import { namedColors } from '../src/agents/colors';
 
 class InlineAdapter extends NodeAdapter {
   async preview(image: PixelImage) { return `data:image/jpeg;base64,${encodeJPEG(image).toString('base64')}`; }
@@ -23,7 +24,7 @@ function drawingBlocks(batchSize: number) {
     const step = steps.get(key) ?? 0;
     const images = request.messages.flatMap(message => Array.isArray(message.content) ? message.content.filter(part => part.type === 'image_url') : []);
     assert.equal(images.length, reviewer || step === 3 || step === 6 ? 1 : 0, 'Only completed blocks reach visual inspection');
-    if (images.length) assert.equal(images[0].image_url!.url, `data:image/jpeg;base64,${encodeJPEG(new PixelRenderer().render(scene!)).toString('base64')}`);
+    if (images.length) assert.equal(images[0].image_url!.url, `data:image/jpeg;base64,${encodeJPEG(new PixelRenderer().render(sceneFromModel(scene!))).toString('base64')}`);
     let name: string, args: Record<string, unknown>;
     if (reviewer) {
       name = 'submit_review'; args = { revision: scene!.revision, approved: context.round === 2,
@@ -63,7 +64,7 @@ function drawingBlocks(batchSize: number) {
     requestNumber++;
     return Response.json({ id: `block-${requestNumber}`, object: 'chat.completion', created: 1, model: request.model,
       choices: [{ index: 0, finish_reason: 'tool_calls', message: { role: 'assistant', content: null,
-        tool_calls: [{ id: `block-call-${requestNumber}`, type: 'function', function: { name, arguments: JSON.stringify(args) } }],
+        tool_calls: [{ id: `block-call-${requestNumber}`, type: 'function', function: { name, arguments: JSON.stringify(namedColors(args)) } }],
       } }],
     });
   };

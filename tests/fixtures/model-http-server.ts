@@ -6,7 +6,7 @@ const server = createServer(async (request, response) => {
   const controller = new AbortController();
   response.once('close', () => { if (!response.writableEnded) controller.abort(); });
   if (request.url === '/health') { response.end('ok'); return; }
-  if (request.url === '/requests') { response.setHeader('Content-Type', 'application/json'); response.end(JSON.stringify(model.requests.map(item => ({ model: item.model, ...requestContext(item) })))); return; }
+  if (request.url === '/requests') { response.setHeader('Content-Type', 'application/json'); response.end(JSON.stringify(model.requests.map(item => ({ model: item.model, tools: item.tools.map(tool => tool.function.name), ...requestContext(item) })))); return; }
   if (request.url === '/reset') { model = mockModel(); response.end('ok'); return; }
   let body = '';
   for await (const chunk of request) body += chunk.toString();

@@ -2,9 +2,9 @@
 
 This layer owns scene data, schemas, catalogs, recipes, deterministic CPU rendering, atomic edits, history, and the provider-independent `SceneTools` interface. It has no UI, model, filesystem, or transport dependency. Its only external dependency is Ajv for validation.
 
-Coordinates start at the top-left. Bounds are `[x, y, width, height]`. Palette indices define colors and scenes contain at most 16 palette colors. Equal layers use object array order, preserved in serialization. Procedural objects receive stable seeds. Rendering produces RGBA pixel data; adapters encode images and persist files.
+Coordinates start at the top-left. Bounds are `[x, y, width, height]`. All scenes use the same fixed 16-color basic palette. Stored objects use palette indices; the renderer owns their exact RGB values. Alternate or custom palettes are rejected. Equal layers use object array order, preserved in serialization. Procedural objects receive stable seeds. Rendering produces RGBA pixel data; adapters encode images and persist files.
 
-`SceneTools` exposes catalog discovery, scene creation, inspection, atomic operation batches, rendering, undo/redo, palette changes, JSON persistence, and PNG export. Its injected `ToolAdapter` owns image references and file access. No tool evaluates code. Circles use ellipse bounds; rectangles and triangles use polygons. Recipes remain available for offline consumers while drawing agents create their own compositions.
+`SceneTools` exposes catalog discovery, scene creation, inspection, atomic operation batches, rendering, undo/redo, JSON persistence, and PNG export. Its injected `ToolAdapter` owns image references and file access. No tool evaluates code. Circles use ellipse bounds; rectangles and triangles use polygons. Recipes remain available for offline consumers while drawing agents create their own compositions.
 
 One successful batch creates one undo entry. Failed edits leave content, revision, pixels, and history unchanged. Revisions increase through undo/redo while content and seeds restore. Expected revisions reject stale edits.
 

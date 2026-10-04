@@ -66,8 +66,8 @@ test('material fills are clipped to a polygon and scaled without interpolation',
   store.apply('mask', [{ op: 'add', object: { id:'triangle', kind:'polygon', layer:0, points:[[5,5],[25,5],[5,25]], material:{ id:'stone' }, seed:42 } }]);
   const image = renderer.render(store.get('mask')), zoom = renderer.render(store.get('mask'), { scale: 2 });
   const pixel = (i: PixelImage,x:number,y:number) => [...i.data.slice((y*i.width+x)*4,(y*i.width+x)*4+4)];
-  assert.deepEqual(pixel(image,20,20), [23,33,38,255]);
-  assert.notDeepEqual(pixel(image,8,8), [23,33,38,255]);
+  assert.deepEqual(pixel(image,20,20), [0,0,0,255]);
+  assert.notDeepEqual(pixel(image,8,8), [0,0,0,255]);
   for (let y=0;y<64;y++) for(let x=0;x<64;x++) assert.deepEqual(pixel(zoom,x,y),pixel(image,Math.floor(x/2),Math.floor(y/2)));
 });
 test('projective map maps corners and compresses texture depth nonlinearly', () => {
@@ -114,6 +114,6 @@ test('sprites respect anchor, transparency and nearest palette colors', () => {
   renderer.registerAsset({manifest:{id:'test',description:'test',width:2,height:1,anchor:[1,0],tags:[]},image:{width:2,height:1,data:new Uint8ClampedArray([255,255,255,255,255,0,0,0])}});
   store.apply('sprite',[{op:'add',object:{id:'sprite_obj',kind:'sprite',asset:'test',bounds:[8,8,4,2],layer:1}}]);
   const image = renderer.render(store.get('sprite'));
-  assert.notDeepEqual([...image.data.slice((8*32+6)*4,(8*32+6)*4+3)],[23,33,38]);
-  assert.deepEqual([...image.data.slice((8*32+8)*4,(8*32+8)*4+3)],[23,33,38]);
+  assert.deepEqual([...image.data.slice((8*32+6)*4,(8*32+6)*4+3)],[255,255,255]);
+  assert.deepEqual([...image.data.slice((8*32+8)*4,(8*32+8)*4+3)],[0,0,0]);
 });

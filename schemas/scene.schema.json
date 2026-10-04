@@ -31,22 +31,30 @@
       "type": "object",
       "properties": {
         "id": {
-          "type": "string",
-          "pattern": "^[a-zA-Z][a-zA-Z0-9_-]{0,63}$"
+          "const": "basic"
         },
         "name": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 80
+          "const": "Basic"
         },
         "colors": {
-          "type": "array",
-          "minItems": 1,
-          "maxItems": 16,
-          "items": {
-            "type": "string",
-            "pattern": "^#[0-9a-fA-F]{6}$"
-          }
+          "const": [
+            "#000000",
+            "#0000AA",
+            "#00AA00",
+            "#00AAAA",
+            "#AA0000",
+            "#AA00AA",
+            "#AA5500",
+            "#AAAAAA",
+            "#555555",
+            "#5555FF",
+            "#55FF55",
+            "#55FFFF",
+            "#FF5555",
+            "#FF55FF",
+            "#FFFF55",
+            "#FFFFFF"
+          ]
         }
       },
       "required": [
@@ -4492,13 +4500,13 @@
                     "type": "integer",
                     "minimum": 0,
                     "maximum": 15,
-                    "default": 2
+                    "default": 8
                   },
                   "highlight_color": {
                     "type": "integer",
                     "minimum": 0,
                     "maximum": 15,
-                    "default": 4
+                    "default": 7
                   }
                 },
                 "required": [],

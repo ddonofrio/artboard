@@ -1,12 +1,13 @@
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { streamText, type ModelMessage, type StepResult, type ToolSet } from 'ai';
-import { requireResult, type PixelImage, type Scene, type SceneTools, type ToolResult } from '../core/index.js';
+import { BASIC_PALETTE, requireResult, type PixelImage, type Scene, type SceneTools, type ToolResult } from '../core/index.js';
 import { agentConfig, listModels, type AgentConfig } from './config.js';
 import { drawingRequest, EDITOR_INSTRUCTIONS, REVIEWER_INSTRUCTIONS } from './prompts.js';
 import { agentTools, toolUsage, type DraftSubmission, type Handoff, type Review } from './tools.js';
 import { drawingFeedback } from './feedback.js';
 import { LoopDetector, type LoopDetection } from './plugins/loop-detector.js';
 import { modelStream } from './stream.js';
+import { namedColors } from './colors.js';
 
 export interface AgentDraft { scene: Scene; preview: { image_ref: string; revision: number } }
 type DrawingAgent = Omit<Parameters<typeof streamText<ToolSet>>[0], 'messages' | 'prompt'>;
@@ -93,7 +94,7 @@ export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunRe
   // mutating an accepted scene or sharing a run's state with another run.
   try { host.store.get(sceneId); throw new Error('Use a fresh draft scene store for each agent run.'); }
   catch (error) { if (!(error instanceof Error) || !error.message.startsWith('Scene not found:')) throw error; }
-  if (options.initial_scene) host.store.load(sceneId, options.initial_scene);
+  if (options.initial_scene) host.store.load(sceneId, { ...options.initial_scene, palette: structuredClone(BASIC_PALETTE) });
   else host.store.create({ scene_id: sceneId, width: 640, height: 480 });
   const emit = (event: AgentEvent) => options.onEvent?.(event);
   emit({ type: 'connection', base_url: config.base_url });
@@ -208,11 +209,11 @@ export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunRe
     await emit({ type: 'final', result: structuredClone(result) });
     return result;
   };
-  const incomplete = async (error: unknown): Promise<AgentRunResult> => {
+  const incomplete = async (error: unknown, ended = false): Promise<AgentRunResult> => {
     options.signal?.throwIfAborted();
-    // A valid canvas remains deliverable even without a model submission.
-    // Before creation there is no generated image to preserve.
-    try { host.store.get(sceneId); }
+    // Preserve the prepared canvas after a model response or edits; an initial
+    // transport failure has no model result to deliver.
+    try { if (!ended && phaseSteps === 0 && !options.initial_scene && host.store.get(sceneId).revision === 0) throw error; }
     catch (missing) {
       if (!(missing instanceof Error && missing.message.startsWith('Scene not found:'))) throw missing;
       throw error;
@@ -241,7 +242,7 @@ export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunRe
         }
         lastImage = image;
         if (role === 'editor' && result.ok && changedPixels > 0 && ['scene_apply', 'scene_history', 'scene_io'].includes(name)) correctionApplied = true;
-        if (result.ok && ['scene_create', 'scene_apply', 'scene_history', 'scene_io'].includes(name)) {
+        if (result.ok && ['scene_inspect', 'scene_apply', 'scene_history'].includes(name)) {
           result.result.changed_pixels = changedPixels;
           const ids = result.result.affected_ids;
           result.result.feedback = drawingFeedback(host, scene, changedPixels, Array.isArray(ids) ? ids.filter((id): id is string => typeof id === 'string') : []);
@@ -315,10 +316,10 @@ export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunRe
           throw new Error('The prepared canvas is unavailable. Start a new drawing with a fresh scene host.');
         }
         const previews = requestedImages.editor.splice(0);
-        const context = JSON.stringify({ ...JSON.parse(text), current_scene: current, image_attached: previews.length > 0 });
+        const context = JSON.stringify(namedColors({ ...JSON.parse(text), current_scene: current, image_attached: previews.length > 0 }));
         const currentMessage = phaseMessages(context, previews)[0];
         // Append new state instead of rewriting the cached conversation prefix.
-        const updatedMessages = contextMessages.some(message => message.role === 'assistant' || message.role === 'tool') || previews.length ? [...contextMessages, currentMessage] : contextMessages;
+        const updatedMessages = recovery ? [...contextMessages.slice(0, -1), currentMessage] : contextMessages.some(message => message.role === 'assistant' || message.role === 'tool') || previews.length ? [...contextMessages, currentMessage] : contextMessages;
         preparedRevision = current.revision;
         return { instructions: editorBase, messages: updatedMessages };
       },
@@ -330,9 +331,9 @@ export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunRe
     };
     const text = drawingRequest(options.prompt, { scene_id: sceneId, round, review: pendingReview ?? null, current_scene: host.store.get(sceneId), image_attached: false, vision_available: config.vision, ...(options.stage ? { workflow: options.stage.context } : {}) });
     try { await consume(editor, phaseMessages(text)); }
-    catch (error) { return incomplete(error); }
+    catch (error) { return incomplete(error, error instanceof Error && error.name === 'AI_ToolChoiceViolationError'); }
     options.signal?.throwIfAborted();
-    if (!submission) return incomplete(new Error(phaseFailure('Editor', 'finish_draft')));
+    if (!submission) return incomplete(new Error(phaseFailure('Editor', 'finish_draft')), true);
     const scene = host.store.get(sceneId);
     if (submission.revision !== scene.revision) return incomplete(new Error('Editor changed the scene after submitting it. The current canvas is delivered without review.'));
     if (options.stage) handoff = { done: submission.done!, not_done: submission.not_done! };

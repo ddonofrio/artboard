@@ -22,7 +22,7 @@ export class SceneStore {
   create(args: { scene_id: string; width?: number; height?: number; palette?: string | Palette; seed?: number; recipe?: RecipeId; recipe_params?: Params }): Scene {
     if (this.entries.has(args.scene_id)) fail('SCENE_EXISTS', `Scene already exists: ${args.scene_id}`, 'scene_id');
     const width = args.width ?? 640, height = args.height ?? 480, seed = args.seed ?? 1;
-    const scene: Scene = { version: 1, renderer_version: RENDERER_VERSION, id: args.scene_id, width, height, palette: resolvePalette(args.palette ?? (args.recipe ? recipes[args.recipe].palette : 'daylight')), seed, revision: 0, objects: args.recipe ? expandRecipe(args.recipe, seed, args.recipe_params, width, height) : [] };
+    const scene: Scene = { version: 1, renderer_version: RENDERER_VERSION, id: args.scene_id, width, height, palette: resolvePalette(args.palette ?? (args.recipe ? recipes[args.recipe].palette : 'basic')), seed, revision: 0, objects: args.recipe ? expandRecipe(args.recipe, seed, args.recipe_params, width, height) : [] };
     validateScene(scene);
     this.entries.set(scene.id, { scene: copy(scene), undo: [], redo: [] });
     return copy(scene);

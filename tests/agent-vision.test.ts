@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { PixelRenderer, SceneStore, SceneTools, type PixelImage } from '../src/core/index';
 import { NodeAdapter, encodeJPEG } from '../src/adapters/node/index';
 import { runWorkflow, type WorkflowEvent } from '../src/workflows/run';
-import { mockModel, requestContext, type ChatRequest } from './fixtures/model';
+import { mockModel, requestContext, sceneFromModel, type ChatRequest } from './fixtures/model';
 
 class InlineAdapter extends NodeAdapter {
   async preview(image: PixelImage) { return `data:image/jpeg;base64,${encodeJPEG(image).toString('base64')}`; }
@@ -29,7 +29,7 @@ for (const layers of [2, 4]) {
         assert.equal(images.length, look === 2 || (reviewer && look === 0) ? 1 : 0, `request ${requests}: reviewers get their draft initially and other images require a successful render`);
         if (images.length) {
           imagesSeen++;
-          const expected = new PixelRenderer().render(scene!, look === 2 ? { crop: [0, 0, 8, 6], scale: 2 } : {});
+          const expected = new PixelRenderer().render(sceneFromModel(scene!), look === 2 ? { crop: [0, 0, 8, 6], scale: 2 } : {});
           assert.equal(images[0].image_url!.url, `data:image/jpeg;base64,${encodeJPEG(expected).toString('base64')}`);
           if (look === 2) {
             const lastTool = request.messages.filter(message => message.role === 'tool').at(-1)!;

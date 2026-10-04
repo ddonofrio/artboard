@@ -5,6 +5,7 @@ import { PixelRenderer, SceneStore, SceneTools, type PixelImage, type Scene } fr
 import { NodeAdapter, encodeJPEG } from '../src/adapters/node/index';
 import { drawingFeedback } from '../src/agents/feedback';
 import { EDITOR_INSTRUCTIONS, REVIEWER_INSTRUCTIONS } from '../src/agents/prompts';
+import { namedColors } from '../src/agents/colors';
 
 class InlineAdapter extends NodeAdapter {
   async preview(image: PixelImage) { return `data:image/jpeg;base64,${encodeJPEG(image).toString('base64')}`; }
@@ -64,7 +65,7 @@ function simulatedServer(options: MockOptions = {}) {
       const approved = options.approveAll || (context.round === (options.approveAt ?? 3) && !options.rejectFinal);
       args = { revision: context.draft!.scene.revision + (options.staleReview && context.round === 1 && step === 0 ? 99 : 0), approved, issues: approved ? [] : [{ object_id: 'entrance_gate', instruction: 'Reduce the number of bars to make the entrance clearer.' }] };
     }
-    return Response.json({ id: `chat-${requests.length}`, object: 'chat.completion', created: 1, model: request.model, choices: [{ index: 0, finish_reason: 'tool_calls', message: { role: 'assistant', content: null, tool_calls: [{ id: `call-${requests.length}`, type: 'function', function: { name, arguments: options.malformedCreate && requests.length === 1 ? '{' : JSON.stringify(args) } }] } }], usage: { prompt_tokens: 200, completion_tokens: 40, total_tokens: 240 } });
+    return Response.json({ id: `chat-${requests.length}`, object: 'chat.completion', created: 1, model: request.model, choices: [{ index: 0, finish_reason: 'tool_calls', message: { role: 'assistant', content: null, tool_calls: [{ id: `call-${requests.length}`, type: 'function', function: { name, arguments: options.malformedCreate && requests.length === 1 ? '{' : JSON.stringify(namedColors(args)) } }] } }], usage: { prompt_tokens: 200, completion_tokens: 40, total_tokens: 240 } });
   };
   return { fetcher, requests, urls };
 }
@@ -182,7 +183,13 @@ test('multiple calls in one response wait for each preview before changing the s
   let first = true;
   const running = runAgentLoop({ tools, initial_scene: base, prompt: 'Draw in stages', config: { editor_model: 'vl' },
     fetch: async (input, init) => {
-      if (!first) return fake.fetcher(input, init);
+      if (!first) {
+        const request = JSON.parse(String(init?.body)) as ChatRequest;
+        if (request.tools.some(tool => tool.function.name === 'submit_review')) return fake.fetcher(input, init);
+        return Response.json({ id: 'submit-after-preview', object: 'chat.completion', created: 1, model: 'vl', choices: [{ index: 0, finish_reason: 'tool_calls', message: { role: 'assistant', content: null,
+          tool_calls: [{ id: 'submit-after-preview', type: 'function', function: { name: 'finish_draft', arguments: JSON.stringify({ revision: 2 }) } }],
+        } }] });
+      }
       first = false;
       const calls = [
         { name: 'scene_apply', args: { scene_id: 'artboard', operations: [{ op: 'update', id: 'background', changes: { color: 6 } }] } },
@@ -190,7 +197,7 @@ test('multiple calls in one response wait for each preview before changing the s
         { name: 'finish_draft', args: { revision: 2 } },
       ];
       return Response.json({ id: 'multi', object: 'chat.completion', created: 1, model: 'vl', choices: [{ index: 0, finish_reason: 'tool_calls', message: { role: 'assistant', content: null,
-        tool_calls: calls.map((call, i) => ({ id: `multi-${i}`, type: 'function', function: { name: call.name, arguments: JSON.stringify(call.args) } })),
+        tool_calls: calls.map((call, i) => ({ id: `multi-${i}`, type: 'function', function: { name: call.name, arguments: JSON.stringify(namedColors(call.args)) } })),
       } }] });
     },
     onEvent: async event => {
@@ -329,7 +336,7 @@ test('XML embedded in function arguments is rejected with protocol guidance, the
   const result = await runAgentLoop({ tools: host(), prompt: 'Draw a cave', config: { editor_model: 'vl' }, onEvent: event => events.push(event), fetch: async (input, init) => {
     if (!first) return fake.fetcher(input, init);
     first = false;
-    return Response.json({ id: 'xml', object: 'chat.completion', created: 1, model: 'vl', choices: [{ index: 0, finish_reason: 'tool_calls', message: { role: 'assistant', content: null, tool_calls: [{ id: 'xml-call', type: 'function', function: { name: 'scene_create', arguments: JSON.stringify({ scene_id: 'artboard</parameter>\\n<parameter=width>640' }) } }] } }] });
+    return Response.json({ id: 'xml', object: 'chat.completion', created: 1, model: 'vl', choices: [{ index: 0, finish_reason: 'tool_calls', message: { role: 'assistant', content: null, tool_calls: [{ id: 'xml-call', type: 'function', function: { name: 'scene_inspect', arguments: JSON.stringify({ scene_id: 'artboard</parameter>\\n<parameter=width>640' }) } }] } }] });
   } });
   assert.equal(result.approved, true);
   const rejected = events.find(event => event.type === 'tool' && !event.ok);
@@ -380,7 +387,7 @@ test('recovery preserves successful calls and supplies current scene JSON withou
       const content = users.at(-1)!.content;
       assert.equal(typeof content, 'string');
       const context = JSON.parse(content as string);
-      assert.deepEqual(context.current_scene, tools.store.get('artboard'));
+      assert.deepEqual(context.current_scene, namedColors(tools.store.get('artboard')));
       assert.equal(context.current_scene.revision, 1);
       assert.ok(!JSON.stringify(request.messages).includes('data:image/'));
       assert.equal(request.messages.filter(message => message.role === 'assistant' || message.role === 'tool').length, 0);
@@ -544,7 +551,7 @@ test('misplaced object colors return actionable feedback and recover before draf
     const response = await fake.fetcher(input, init);
     if (calls !== 2) return response;
     const operations = request.tools.find((item: { function: { name: string } }) => item.function.name === 'scene_apply').function.parameters.properties.operations;
-    assert.equal(operations.items.oneOf[0].properties.object.properties.color.type, 'integer');
+    assert.equal(operations.items.oneOf[0].properties.object.properties.color.type, 'string');
     assert.equal(operations.items.oneOf[0].additionalProperties, false);
     correct = await response.json();
     const damaged = structuredClone(correct) as { choices: { message: { tool_calls: { function: { arguments: string } }[] } }[] };

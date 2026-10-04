@@ -1,4 +1,10 @@
 import type { Scene } from '../../src/core/types';
+import { namedColors, indexedColors } from '../../src/agents/colors';
+import { BASIC_PALETTE } from '../../src/core/colors';
+
+export function sceneFromModel(scene: Scene): Scene {
+  return indexedColors({ ...scene, palette: BASIC_PALETTE }) as Scene;
+}
 
 export interface ChatRequest {
   stream?: boolean;
@@ -64,7 +70,7 @@ export function mockModel() {
       if (context.prompt.includes('[invalid-handoff]') && !invalidBefore) delete args.not_done;
     }
     return Response.json({ id: `chat-${requests.length}`, object: 'chat.completion', created: 1, model: request.model,
-      choices: [{ index: 0, finish_reason: 'tool_calls', message: { role: 'assistant', content: null, ...(context.prompt.includes('[thinking]') ? { reasoning_content: 'Inspect the requested scene and place each element in its assigned layer. '.repeat(20) } : {}), tool_calls: [{ name, args }, ...extraCalls].map((call, index) => ({ id: `call-${requests.length}-${index}`, type: 'function', function: { name: call.name, arguments: JSON.stringify(call.args) } })) } }],
+      choices: [{ index: 0, finish_reason: 'tool_calls', message: { role: 'assistant', content: null, ...(context.prompt.includes('[thinking]') ? { reasoning_content: 'Inspect the requested scene and place each element in its assigned layer. '.repeat(20) } : {}), tool_calls: [{ name, args }, ...extraCalls].map((call, index) => ({ id: `call-${requests.length}-${index}`, type: 'function', function: { name: call.name, arguments: JSON.stringify(namedColors(call.args)) } })) } }],
       usage: context.prompt.includes('[thinking]')
         ? { prompt_tokens: 50, completion_tokens: 600, total_tokens: 650, completion_tokens_details: { reasoning_tokens: 512 } }
         : { prompt_tokens: 50, completion_tokens: 25, total_tokens: 75 },

@@ -4,8 +4,8 @@ import type { PaintStyle } from '../../contracts/service.js';
 export interface PaintPreview { scene: Scene; style: PaintStyle }
 /** Replay validated edits on an isolated store for presentation; the real batch stays atomic. */
 export function paintPreviews(before: Scene | undefined, after: Scene, operations?: Operation[]): PaintPreview[] {
-  if (!before || !operations?.length) return [{ scene: after, style: { kind: 'scanline' } }];
-  const store = new SceneStore(); store.load(after.id, before);
+  if (!operations?.length) return [{ scene: after, style: { kind: 'scanline' } }];
+  const store = new SceneStore(); store.load(after.id, before ?? { ...after, objects: [], revision: 0 });
   return operations.map(operation => {
     const id = operation.op === 'add' ? operation.object.id : operation.id;
     const previous = store.get(after.id).objects.find(object => object.id === id);
