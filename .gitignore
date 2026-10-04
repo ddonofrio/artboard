@@ -1,0 +1,10 @@
+node_modules/
+dist/
+dist-lib/
+outputs/
+examples/
+.tmp/
+.env
+.env.*
+!.env.example
+*.local

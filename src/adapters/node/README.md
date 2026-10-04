@@ -1,0 +1,5 @@
+# Node drawing adapter
+
+This adapter encodes RGBA pixels as PNG/JPEG and persists scene JSON and PNG files under an explicit output directory. It implements core's `ToolAdapter`, without importing agents, UI, or Vite. The package exposes it at `artboard/node`.
+
+File operations validate plain filenames and keep resolved paths inside the configured root. The default preview writes PNG; the agent command overrides preview to return inline JPEG data for model vision. `encodePNG` and `encodeJPEG` also support hosts that own persistence themselves.

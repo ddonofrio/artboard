@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "allowImportingTsExtensions": false,
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "outDir": "dist-lib",
+    "rootDir": "src"
+  },
+  "include": [
+    "src/core/**/*.ts",
+    "src/agents/**/*.ts",
+    "src/adapters/**/*.ts"
+  ]
+}

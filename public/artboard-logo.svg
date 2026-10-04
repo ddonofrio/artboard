@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="92" fill="#111c20"/>
+
+  <!-- Artboard corner marks -->
+  <path d="M112 190V112h78 M322 112h78v78 M400 322v78h-78 M190 400h-78v-78"
+        fill="none" stroke="#d7b675" stroke-width="22" stroke-linecap="square" stroke-linejoin="miter"/>
+
+  <!-- Geometric A, echoing the Adventure mark but built as drawing primitives -->
+  <path d="M160 350 242 166h28l82 184h-42l-21-50h-67l-21 50z"
+        fill="#d7b675"/>
+  <path d="M247 241h18l18 43h-54z" fill="#111c20"/>
+
+  <!-- Small anchor pixels: tool/artboard reference -->
+  <rect x="101" y="101" width="22" height="22" fill="#d7b675"/>
+  <rect x="389" y="101" width="22" height="22" fill="#d7b675"/>
+  <rect x="101" y="389" width="22" height="22" fill="#d7b675"/>
+  <rect x="389" y="389" width="22" height="22" fill="#d7b675"/>
+</svg>

@@ -2,7 +2,7 @@
   <img src="assets/artboard-logo.svg" alt="Artboard logo" width="144">
 </p>
 
-<h1 align="center">Adventure Artboard</h1>
+<h1 align="center">Artboard</h1>
 
 <p align="center"><strong>A canvas for AI agents. A new adventure in every frame.</strong></p>
 
@@ -20,7 +20,7 @@ Artboard is a drawing toolkit for composing scenes with the visual character of 
 
 The agent decides what to draw and how to compose it. Artboard provides the means to put that composition on a canvas.
 
-Its primary integration surface is **MCP (Model Context Protocol)**, allowing the Adventure engine and other compatible agents to use its drawing capabilities. A small browser-based command interface provides a way to work with the same toolkit directly.
+Its primary integration surface is **MCP (Model Context Protocol)**, allowing the Adventure engine and other compatible agents to use its drawing capabilities. MCP transport and the small browser command interface are under development; the current implementation exposes the toolkit as a TypeScript library and a Node CLI.
 
 ## For Humans
 
@@ -51,7 +51,37 @@ Artboard is designed as a reusable component. Adventure is its original home, bu
 
 **Under development.** The drawing application is being explored and refined, and its visual style is still evolving.
 
-This repository currently contains the project introduction and the Artboard logo only. Implementation, setup instructions, and the concrete MCP tool reference will be added as the project is published.
+The repository contains the drawing core, a separate editor/reviewer workflow, Node adapters, and a new Vite work-in-progress page. Artboard is the maintained drawing component of Adventure. Story generation, narration, player choices, and game sessions stay in Adventure.
+
+## Start
+
+```sh
+npm ci
+npm run dev
+```
+
+Use Node.js 22.12 or newer. On Windows PowerShell, use `npm.cmd` if execution policy blocks `npm.ps1`. The browser shows an English **Work in progress** page. No model connection is required to start it.
+
+## Structure
+
+```text
+src/core/           Drawing contracts, tools, rendering, catalogs, and history
+src/agents/         Drawing editor/reviewer workflow and model transport
+src/adapters/node/  Filesystem persistence and image encoding
+src/ui/             New browser interface, currently a placeholder
+scripts/            Node commands and reproducible artifact generation
+tests/              Drawing and agent invariants
+schemas/            Generated scene and tool JSON contracts
+```
+
+Core, agents, Node adapters, and UI have separate responsibilities and import boundaries enforced by lint. The UI does not import agent orchestration or Node adapters. Vite builds the browser application and separate reusable library entries.
+
+- [Drawing core](src/core/README.md)
+- [Drawing agents](src/agents/README.md)
+- [Node adapter](src/adapters/node/README.md)
+- [Browser interface](src/ui/README.md)
+- [Setup, commands, model configuration, and validation](DEVELOPMENT.md)
+- [Development contract](AGENTS.md)
 
 ---
 
