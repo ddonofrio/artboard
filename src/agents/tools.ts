@@ -2,14 +2,17 @@ import Ajv from 'ajv';
 import { jsonSchema, tool, type ToolSet } from 'ai';
 import { generators, materials, objectSchema, sceneObjectSchema, toolSchemas, type SceneTools, type ToolResult } from '../core/index.js';
 
-export interface DraftSubmission { revision: number }
+export interface Handoff { done: string[]; not_done: { item: string; reason: string }[] }
+export interface DraftSubmission { revision: number; done?: Handoff['done']; not_done?: Handoff['not_done'] }
 export interface Review { revision: number; approved: boolean; issues: { object_id: string; instruction: string }[] }
 const shortText = { type: 'string', minLength: 1, maxLength: 1000 };
 const revision = { type: 'integer', minimum: 0, maximum: Number.MAX_SAFE_INTEGER };
 export const draftSubmissionSchema = objectSchema({ revision }, ['revision']);
+export const stageSubmissionSchema = objectSchema({ revision, done: { type: 'array', maxItems: 100, items: shortText }, not_done: { type: 'array', maxItems: 100, items: objectSchema({ item: shortText, reason: shortText }, ['item', 'reason']) } }, ['revision', 'done', 'not_done']);
 export const reviewSchema = objectSchema({ revision, approved: { type: 'boolean' }, issues: { type: 'array', maxItems: 3, items: objectSchema({ object_id: { type: 'string', minLength: 1, maxLength: 80 }, instruction: shortText }, ['object_id', 'instruction']) } }, ['revision', 'approved', 'issues']);
 const ajv = new Ajv({ strict: false, allErrors: true });
 const validateDraft = ajv.compile(draftSubmissionSchema), validateReview = ajv.compile(reviewSchema);
+const validateStage = ajv.compile(stageSubmissionSchema);
 const error = (message: string): ToolResult => ({ ok: false, error: { code: 'AGENT_VALIDATION', message } });
 
 // Describe nesting and geometry without repeating every generator/material
@@ -51,7 +54,7 @@ function misplacedObjectField(args: Record<string, unknown>): string | undefined
 }
 
 /** Thin SDK adapters around the existing tool dispatcher, not a second tool runtime. */
-export function agentTools(host: SceneTools, sceneId: string, role: 'editor' | 'reviewer', signal: AbortSignal | undefined, onTool: (name: string, result: ToolResult, input: Record<string, unknown>) => void | Promise<void>, onDraft: (draft: DraftSubmission) => void, onReview: (review: Review) => void, submissionError: (revision: number) => string | undefined = () => undefined): ToolSet {
+export function agentTools(host: SceneTools, sceneId: string, role: 'editor' | 'reviewer', signal: AbortSignal | undefined, onTool: (name: string, result: ToolResult, input: Record<string, unknown>) => void | Promise<void>, onDraft: (draft: DraftSubmission) => void, onReview: (review: Review) => void, submissionError: (revision: number) => string | undefined = () => undefined, requireHandoff = false): ToolSet {
   const result: ToolSet = {};
   // Local models can return several calls despite parallel_tool_calls=false.
   // Serialize adapter executions, including presentation of each preview.
@@ -109,10 +112,10 @@ export function agentTools(host: SceneTools, sceneId: string, role: 'editor' | '
   const name = role === 'editor' ? 'finish_draft' : 'submit_review';
   result[name] = tool({
     description: role === 'editor' ? 'Submit only the completed drawing revision to the independent reviewer. No narrative or choices. Call alone, after edits.' : 'Approve this exact drawing revision or return minimal drawing corrections. Read-only; call alone.',
-    inputSchema: jsonSchema<Record<string, unknown>>(role === 'editor' ? draftSubmissionSchema : reviewSchema),
+    inputSchema: jsonSchema<Record<string, unknown>>(role === 'editor' ? (requireHandoff ? stageSubmissionSchema : draftSubmissionSchema) : reviewSchema),
     execute: value => sequential(async () => {
       signal?.throwIfAborted();
-      const validator = role === 'editor' ? validateDraft : validateReview;
+      const validator = role === 'editor' ? (requireHandoff ? validateStage : validateDraft) : validateReview;
       let output: ToolResult;
       if (!validator(value)) output = error(`Invalid ${name}: ${ajv.errorsText(validator.errors)}`);
       else {
@@ -127,7 +130,9 @@ export function agentTools(host: SceneTools, sceneId: string, role: 'editor' | '
         } else {
           const review = value as unknown as Review;
           const unknown = review.issues.find(issue => issue.object_id !== 'scene' && !scene.objects.some(o => o.id === issue.object_id));
+          const message = review.approved ? submissionError(scene.revision) : undefined;
           if (unknown) output = error(`Unknown object ID ${unknown.object_id}. Use an existing object ID or scene.`);
+          else if (message) output = error(message);
           else if (review.approved && review.issues.length) output = error('An approved review must have no unresolved issues.');
           else if (!review.approved && !review.issues.length) output = error('A rejected review needs at least one actionable issue.');
           else { onReview(structuredClone(review)); output = { ok: true, result: { revision: scene.revision, submitted: true } }; }

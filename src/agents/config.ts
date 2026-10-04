@@ -13,6 +13,7 @@ export const DEFAULT_AGENT_CONFIG: AgentConfig = {
   max_reviews: 10, max_output_tokens: 8192, timeout_ms: 300000, vision: true,
 };
 export function apiBaseURL(value: string): string {
+  if (typeof value !== 'string' || !value.trim() || value.length > 4096) throw new Error('base_url must be a nonempty HTTP(S) API URL.');
   const url = new URL(value.trim());
   if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw new Error('Use an HTTP(S) API URL without credentials, query, or fragment.');
   url.pathname = url.pathname.replace(/\/+$/, '') || '/v1';

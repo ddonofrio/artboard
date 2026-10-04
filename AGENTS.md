@@ -7,7 +7,10 @@ Read this file, the root README, and the README for the affected layer before ed
 - `src/core` owns drawing data, validation, tools, catalogs, rendering, and scene history. It imports only its own modules and Ajv.
 - `src/agents` owns drawing editor/reviewer orchestration and model transport. It depends on core and AI SDK, never UI, Node adapters, or Vite.
 - `src/adapters/node` owns filesystem persistence and image encoding. It depends on core, never UI or agent orchestration.
-- `src/ui` owns the DOS-style prompt, canvas, and monitor interface. It is an unconnected UI shell and does not import agents or Node adapters. Introduce an explicit service contract before connecting it to agent execution.
+- `src/contracts` owns the pure workflow catalog and browser/service wire types. It imports no runtime layers.
+- `src/workflows` owns stage ordering, role prompts and handoff history. It depends on agents, core and contracts, never UI or filesystem adapters.
+- `src/adapters/server` owns local configuration and HTTP execution. It depends on workflows, agents, core and the Node adapter, never UI or Vite.
+- `src/ui` owns the DOS-style prompt, canvas, and monitor interface. It imports UI modules and the explicit contracts only; it reaches execution through the local HTTP service and never imports agents or Node adapters.
 - `scripts` owns executable Node entry points and reproducible artifact generation.
 - MCP is the intended external integration surface. Its transport belongs in a separate adapter when implemented; core and agents do not depend on it.
 

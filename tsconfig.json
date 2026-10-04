@@ -19,10 +19,13 @@
   "include": [
     "src/core",
     "src/agents",
+    "src/workflows",
+    "src/contracts",
     "src/adapters",
     "scripts",
     "tests",
     "vite.config.ts",
-    "playwright.config.ts"
+    "playwright.config.ts",
+    "playwright.live.config.ts"
   ]
 }

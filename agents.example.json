@@ -1,0 +1,21 @@
+{
+  "_documentation": {
+    "file": "Copied to agents.local.json on startup only when missing. The local file is ignored by Git and never sent to the browser.",
+    "connection": "Optional fields: base_url, api_key, editor_model, reviewer_model, vision, max_reviews (1-10), max_output_tokens (512-32768), timeout_ms (1000-600000). Empty connection uses localhost:1234, model discovery and vision. AGENT_* environment variables override connection fields.",
+    "agents": "Each role supports model and instructions. Empty model inherits editor_model or discovered model; reviewer inherits reviewer_model or the default editor. Instructions extend the role's built-in instructions. Keep private prompts and credentials in this local file.",
+    "layers": "Creation stages count as layers; the reviewer is separate. Workflows 1-6 are implemented. Workflows 7-9 are undefined."
+  },
+  "connection": {},
+  "agents": {
+    "artist": { "model": "", "instructions": "" },
+    "background": { "model": "", "instructions": "" },
+    "distant_background": { "model": "", "instructions": "" },
+    "setting": { "model": "", "instructions": "" },
+    "main_content": { "model": "", "instructions": "" },
+    "foreground": { "model": "", "instructions": "" },
+    "decorator": { "model": "", "instructions": "" },
+    "specialist": { "model": "", "instructions": "" },
+    "integrator": { "model": "", "instructions": "" },
+    "reviewer": { "model": "", "instructions": "" }
+  }
+}

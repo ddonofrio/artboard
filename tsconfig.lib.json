@@ -11,6 +11,8 @@
   "include": [
     "src/core/**/*.ts",
     "src/agents/**/*.ts",
+    "src/workflows/**/*.ts",
+    "src/contracts/**/*.ts",
     "src/adapters/**/*.ts"
   ]
 }

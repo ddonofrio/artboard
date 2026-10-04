@@ -20,7 +20,7 @@ Artboard is a drawing toolkit for composing scenes with the visual character of 
 
 The agent decides what to draw and how to compose it. Artboard provides the means to put that composition on a canvas.
 
-Its primary integration surface is **MCP (Model Context Protocol)**, allowing the Adventure engine and other compatible agents to use its drawing capabilities. MCP transport and the small browser command interface are under development; the current implementation exposes the toolkit as a TypeScript library and a Node CLI.
+Its intended external integration surface is **MCP (Model Context Protocol)**, allowing the Adventure engine and other compatible agents to use its drawing capabilities. MCP transport remains under development. The current implementation exposes the toolkit as a TypeScript library, a Node CLI and a local browser interface for drawing workflows.
 
 ## For Humans
 
@@ -51,7 +51,7 @@ Artboard is designed as a reusable component. Adventure is its original home, bu
 
 **Under development.** The drawing application is being explored and refined, and its visual style is still evolving.
 
-The repository contains the drawing core, a separate editor/reviewer workflow, Node adapters, and a DOS-style browser interface with prompt, canvas, and monitor columns. The UI is not connected to drawing execution or agents yet. Artboard is the maintained drawing component of Adventure. Story generation, narration, player choices, and game sessions stay in Adventure.
+The repository contains the drawing core, separate drawing agents, six creation workflows, Node/HTTP adapters, and a DOS-style browser interface with prompt, canvas, and monitor columns. The UI executes workflows through a local service with live previews, batch input, editing and cancellation. Artboard is the maintained drawing component of Adventure. Story generation, narration, player choices, and game sessions stay in Adventure.
 
 ## Start
 
@@ -60,24 +60,29 @@ npm ci
 npm run dev
 ```
 
-Use Node.js 22.12 or newer. On Windows PowerShell, use `npm.cmd` if execution policy blocks `npm.ps1`. The browser shows the unconnected DOS-style UI. No model connection is required to start it. See the [browser interface](src/ui/README.md) for its controls and integration boundary.
+Use Node.js 22.12 or newer. On Windows PowerShell, use `npm.cmd` if execution policy blocks `npm.ps1`. Startup creates a documented, Git-ignored `agents.local.json` if missing. No model connection is required to open the UI; Send requires an OpenAI-compatible model server. See [development setup](DEVELOPMENT.md) for configuration and the [browser interface](src/ui/README.md) for its controls.
 
 ## Structure
 
 ```text
 src/core/           Drawing contracts, tools, rendering, catalogs, and history
 src/agents/         Drawing editor/reviewer workflow and model transport
+src/workflows/      Creation stages, role prompts and handoff orchestration
+src/contracts/      Shared workflow catalog and HTTP wire types
 src/adapters/node/  Filesystem persistence and image encoding
+src/adapters/server/ Local agent configuration and HTTP execution
 src/ui/             Three-column DOS-style browser interface
 scripts/            Node commands and reproducible artifact generation
 tests/              Drawing, agent, and browser UI invariants
 schemas/            Generated scene and tool JSON contracts
 ```
 
-Core, agents, Node adapters, and UI have separate responsibilities and import boundaries enforced by lint. The UI does not import agent orchestration or Node adapters. Vite builds the browser application and separate reusable library entries.
+Core, agents, workflows, contracts, adapters and UI have separate responsibilities and import boundaries enforced by lint. The UI imports pure contracts and connects to execution through HTTP. Vite builds the browser application and separate reusable core, agent, workflow and Node library entries.
 
 - [Drawing core](src/core/README.md)
 - [Drawing agents](src/agents/README.md)
+- [Drawing workflows](src/workflows/README.md)
+- [Local service](src/adapters/server/README.md)
 - [Node adapter](src/adapters/node/README.md)
 - [Browser interface](src/ui/README.md)
 - [Setup, commands, model configuration, and validation](DEVELOPMENT.md)

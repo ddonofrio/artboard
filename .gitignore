@@ -8,3 +8,4 @@ examples/
 .env.*
 !.env.example
 *.local
+agents.local.json

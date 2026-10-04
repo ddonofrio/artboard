@@ -16,6 +16,10 @@
       "types": "./dist-lib/agents/index.d.ts",
       "import": "./dist-lib/agents.js"
     },
+    "./workflows": {
+      "types": "./dist-lib/workflows/index.d.ts",
+      "import": "./dist-lib/workflows.js"
+    },
     "./node": {
       "types": "./dist-lib/adapters/node/index.d.ts",
       "import": "./dist-lib/node.js"
@@ -24,9 +28,10 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.ui.json",
-    "lint": "eslint src scripts tests vite.config.ts playwright.config.ts eslint.config.js",
+    "lint": "eslint src scripts tests vite.config.ts playwright.config.ts playwright.live.config.ts eslint.config.js",
     "test": "node --import tsx --test tests/*.test.ts",
     "test:ui": "playwright test",
+    "test:live": "playwright test --config playwright.live.config.ts",
     "build": "vite build && vite build --mode library && tsc -p tsconfig.lib.json",
     "preview": "vite preview --host 127.0.0.1",
     "schemas": "tsx scripts/schemas.ts",

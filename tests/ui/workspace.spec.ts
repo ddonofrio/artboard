@@ -22,7 +22,7 @@ test('the approved shell has three columns and no removed controls', async ({ pa
   await expect(page.locator('html')).toHaveAttribute('lang', 'en');
 });
 
-test('typing, checkboxes, and Send stay local without starting execution', async ({ page }) => {
+test('typing and checkboxes stay local before Send starts execution', async ({ page }) => {
   const requests: string[] = [];
   page.on('request', request => requests.push(request.url()));
   const prompt = page.getByRole('textbox', { name: 'Prompt' });
@@ -33,8 +33,7 @@ test('typing, checkboxes, and Send stay local without starting execution', async
   await expect(page.getByRole('checkbox', { name: 'Edit the current scene' })).toBeChecked();
   await expect(page.getByRole('checkbox', { name: 'Batch (one prompt per line)' })).toBeChecked();
   await expect(page.getByRole('button', { name: 'Send' })).toBeEnabled();
-  await page.getByRole('button', { name: 'Send' }).click();
-  await expect(page.getByRole('button', { name: 'Cancel' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Cancel' })).toBeHidden();
   await expect(page.locator('.status')).toHaveText('Not started');
   const empty = await page.locator('canvas').evaluate((canvas: HTMLCanvasElement) => {
     const image = canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height);

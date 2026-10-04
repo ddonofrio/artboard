@@ -3,7 +3,7 @@ import { ToolLoopAgent, type ModelMessage, type StepResult, type ToolSet } from 
 import { requireResult, type PixelImage, type Scene, type SceneTools, type ToolResult } from '../core/index.js';
 import { agentConfig, listModels, type AgentConfig } from './config.js';
 import { EDITOR_INSTRUCTIONS, REVIEWER_INSTRUCTIONS } from './prompts.js';
-import { agentTools, type DraftSubmission, type Review } from './tools.js';
+import { agentTools, type DraftSubmission, type Handoff, type Review } from './tools.js';
 import { drawingFeedback } from './feedback.js';
 import { LoopDetector, type LoopDetection } from './plugins/loop-detector.js';
 
@@ -20,8 +20,9 @@ function serverError(body: unknown, fallback: string): string {
   }
   return fallback;
 }
-export interface AgentRunResult { draft: AgentDraft; reviews: Review[]; drafts: AgentDraft[]; models: { editor: string; reviewer: string }; approved: boolean; stop_reason: 'approved' | 'review_limit' | 'incomplete'; error?: string }
+export interface AgentRunResult { draft: AgentDraft; reviews: Review[]; drafts: AgentDraft[]; models: { editor: string; reviewer: string }; approved: boolean; stop_reason: 'approved' | 'review_limit' | 'incomplete' | 'completed'; error?: string; handoff?: Handoff }
 export type AgentEvent =
+  | { type: 'thinking'; role: 'editor' | 'reviewer'; round: number; text: string }
   | { type: 'connection'; base_url: string; models?: { editor: string; reviewer: string } }
   | { type: 'model'; role: 'editor' | 'reviewer'; round: number; model: string; step: number; state: 'request' | 'response'; output_tokens?: number }
   | { type: 'prompt'; role: 'editor' | 'reviewer'; round: number; step: number; content: string }
@@ -40,6 +41,9 @@ export interface AgentRunOptions {
   tools: SceneTools;
   scene_id?: string;
   initial_scene?: Scene;
+  /** Isolated workflow stage; the original editor/reviewer loop remains the default. */
+  stage?: { instructions: string; context: Record<string, unknown>; final: boolean };
+  reviewer_instructions?: string;
   fetch?: typeof fetch;
   signal?: AbortSignal;
   onEvent?: ((event: AgentEvent) => void) | ((event: AgentEvent) => Promise<void>);
@@ -63,6 +67,9 @@ function debugPrompt(system: string, messages: ModelMessage[]): string {
 /** Review approval ends the workflow; rejected drafts feed the next editor pass. */
 export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunResult> {
   const config = agentConfig(options.config), host = options.tools, sceneId = options.scene_id ?? 'artboard';
+  const editorBase = options.stage?.instructions ?? EDITOR_INSTRUCTIONS;
+  const reviewerInstructions = options.reviewer_instructions ? `${REVIEWER_INSTRUCTIONS}\n${options.reviewer_instructions}` : REVIEWER_INSTRUCTIONS;
+  let handoff: Handoff | undefined;
   if (typeof options.prompt !== 'string' || !options.prompt.trim() || options.prompt.length > 4000) throw new Error('Write a prompt of 1 to 4000 characters.');
   options.signal?.throwIfAborted();
   // The caller supplies an isolated draft host; reject an occupied host to avoid
@@ -93,6 +100,9 @@ export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunRe
       try { body = JSON.parse(raw); } catch { body = undefined; }
       const error = response.ok ? undefined : serverError(body ?? raw, `${response.status} ${response.statusText}`);
       const choice = body?.choices?.[0];
+      const message = choice?.message;
+      const reasoning = typeof message?.reasoning_content === 'string' ? message.reasoning_content : typeof message?.reasoning === 'string' ? message.reasoning : typeof message?.content === 'string' ? [...message.content.matchAll(/<think>([\s\S]*?)(?:<\/think>|$)/g)].map(match => match[1]).join('\n') : '';
+      if (reasoning.trim()) await emit({ type: 'thinking', role: activeRole, round: activeRound, text: reasoning.trim().slice(0, 8000) });
       const text = typeof choice?.message?.content === 'string' ? choice.message.content.replace(/<think>[\s\S]*?(?:<\/think>|$)/g, '[reasoning omitted]') : undefined;
       await emit({ type: 'response', role: activeRole, round: activeRound, status: response.status, finish_reason: choice?.finish_reason, output_tokens: body?.usage?.completion_tokens, text, tool_calls: choice?.message?.tool_calls, error });
       if (!response.ok) {
@@ -137,7 +147,7 @@ export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunRe
       drafts.push(structuredClone(draft));
       await emit({ type: 'draft', round: activeRound, draft: structuredClone(draft) });
     }
-    const result: AgentRunResult = { draft, reviews, drafts, models: { editor: editorModel, reviewer: reviewerModel }, approved: stop_reason === 'approved', stop_reason, ...(error ? { error } : {}) };
+    const result: AgentRunResult = { draft, reviews, drafts, models: { editor: editorModel, reviewer: reviewerModel }, approved: stop_reason === 'approved', stop_reason, ...(error ? { error } : {}), ...(handoff ? { handoff } : {}) };
     await emit({ type: 'final', result: structuredClone(result) });
     return result;
   };
@@ -190,18 +200,18 @@ export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunRe
   const reviewerMessages: ModelMessage[] = [];
   let reviewerRequestMessages: ModelMessage[] = [];
   const reviewer = new ToolLoopAgent({
-    id: 'scene-reviewer', model: provider.chatModel(reviewerModel), instructions: REVIEWER_INSTRUCTIONS,
-    tools: agentTools(host, sceneId, 'reviewer', options.signal, reportTool('reviewer'), () => {}, value => { reviewState.value = value; }),
+    id: 'scene-reviewer', model: provider.chatModel(reviewerModel), instructions: reviewerInstructions,
+    tools: agentTools(host, sceneId, 'reviewer', options.signal, reportTool('reviewer'), () => {}, value => { reviewState.value = value; }, () => handoff?.not_done.length ? `The final artist reports unresolved requirements: ${JSON.stringify(handoff.not_done)}. Return actionable corrections instead of approval.` : undefined),
     toolChoice: 'required', maxRetries: 0, maxOutputTokens: config.max_output_tokens,
     timeout: { stepMs: config.timeout_ms }, stopWhen: () => reviewState.value !== undefined,
     prepareStep: async ({ messages, initialMessages }) => {
-      const recovery = loopDetectors.reviewer.prepareStep({ initialInstructions: REVIEWER_INSTRUCTIONS, initialMessages });
+      const recovery = loopDetectors.reviewer.prepareStep({ initialInstructions: reviewerInstructions, initialMessages });
       if (recovery) await emit({ type: 'loop_detected', role: 'reviewer', round: activeRound, detection: recovery.detection });
-      return { instructions: recovery?.instructions ?? REVIEWER_INSTRUCTIONS, messages: recovery?.messages ?? messages };
+      return { instructions: recovery?.instructions ?? reviewerInstructions, messages: recovery?.messages ?? messages };
     },
     onStepStart: event => {
       reviewerRequestMessages = event.messages;
-      emit({ type: 'prompt', role: 'reviewer', round: activeRound, step: event.stepNumber + 1, content: debugPrompt(REVIEWER_INSTRUCTIONS, event.messages) });
+      emit({ type: 'prompt', role: 'reviewer', round: activeRound, step: event.stepNumber + 1, content: debugPrompt(reviewerInstructions, event.messages) });
       emit({ type: 'model', role: 'reviewer', round: activeRound, model: reviewerModel, step: event.stepNumber + 1, state: 'request' });
     },
     onStepFinish: event => reportStep('reviewer', activeRound, reviewerModel)(event),
@@ -217,14 +227,14 @@ export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunRe
     const editorTools = agentTools(host, sceneId, 'editor', options.signal, reportTool('editor'), value => { submission = value; }, () => {}, revision => {
       if (revision !== preparedRevision) return 'The drawing changed within this response. Inspect its updated JSON/JPEG in the next model request before calling finish_draft alone. Complete every requested element before submitting.';
       if (pendingReview && (revision === pendingReview.revision || !correctionApplied)) return `The reviewer rejected revision ${pendingReview.revision}. Apply visible corrections with scene_apply before calling finish_draft. Pending corrections: ${JSON.stringify(pendingReview.issues)}`;
-    });
-    let editorInstructions = EDITOR_INSTRUCTIONS;
+    }, !!options.stage);
+    let editorInstructions = editorBase;
     const editor = new ToolLoopAgent({
-      id: 'scene-editor', model: provider.chatModel(editorModel), instructions: EDITOR_INSTRUCTIONS,
+      id: 'scene-editor', model: provider.chatModel(editorModel), instructions: editorBase,
       tools: editorTools, toolChoice: 'required', maxRetries: 0, maxOutputTokens: config.max_output_tokens,
       timeout: { stepMs: config.timeout_ms }, stopWhen: () => submission !== undefined,
       prepareStep: async ({ stepNumber, messages, initialMessages }) => {
-        editorInstructions = `${EDITOR_INSTRUCTIONS}\nThe ONLY scene_id in every tool call is "${sceneId}".\nRequest ${stepNumber + 1} in this editor phase. There is no step-count limit. Continue drawing and correcting rejected calls until the requested scene is complete, then call finish_draft.`;
+        editorInstructions = `${editorBase}\nThe ONLY scene_id in every tool call is "${sceneId}".\nRequest ${stepNumber + 1} in this editor phase. There is no step-count limit. Complete your assigned work, then call finish_draft.`;
         if (pendingReview) editorInstructions += `\nCorrect the review of revision ${pendingReview.revision} before resubmitting. Correction checklist: ${JSON.stringify(pendingReview.issues)}`;
         const recovery = loopDetectors.editor.prepareStep({ initialInstructions: editorInstructions, initialMessages });
         if (recovery) await emit({ type: 'loop_detected', role: 'editor', round, detection: recovery.detection });
@@ -252,23 +262,26 @@ export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunRe
       },
       onStepFinish: reportStep('editor', round, editorModel),
     });
-    const text = JSON.stringify({ task: round === 1 ? 'Draw only what the prompt requests.' : 'Edit the drawing to address the independent review.', prompt: options.prompt, scene_id: sceneId, round, max_reviews: config.max_reviews, draft: draft ? { scene: draft.scene } : null, review: reviews.at(-1) ?? null, image_attached: !!draft && config.vision });
+    const text = JSON.stringify({ task: round === 1 ? 'Draw only what the prompt requests.' : 'Edit the drawing to address the independent review.', prompt: options.prompt, scene_id: sceneId, round, max_reviews: config.max_reviews, draft: draft ? { scene: draft.scene } : null, review: reviews.at(-1) ?? null, image_attached: !!draft && config.vision, ...(options.stage ? { workflow: options.stage.context } : {}) });
     try { await editor.generate({ messages: phaseMessages(text, draft, config.vision), abortSignal: options.signal }); }
     catch (error) { return incomplete(error); }
     options.signal?.throwIfAborted();
     if (!submission) return incomplete(new Error(phaseFailure('Editor', 'finish_draft')));
     const scene = host.store.get(sceneId);
     if (submission.revision !== scene.revision) return incomplete(new Error('Editor changed the scene after submitting it. The current canvas is delivered without review.'));
+    if (options.stage) handoff = { done: submission.done!, not_done: submission.not_done! };
     const preview = requireResult<AgentDraft['preview']>(await host.scene_render({ scene_id: sceneId }));
     draft = { scene, preview };
     drafts.push(structuredClone(draft));
     emit({ type: 'draft', round, draft: structuredClone(draft) });
 
+    if (options.stage && !options.stage.final) return deliver('completed');
+
     activeRole = 'reviewer';
     phaseSteps = 0; edits = 0; rejectedTools = 0; lastToolError = '';
     emit({ type: 'phase', role: 'reviewer', round });
     reviewState.value = undefined;
-    reviewerMessages.push(...phaseMessages(JSON.stringify({ task: round === 1 ? 'Compare this drawing with the original prompt.' : 'Review the updated drawing and verify each correction you requested in your previous review.', prompt: options.prompt, scene_id: sceneId, round, previous_review: pendingReview ?? null, draft: { scene: draft.scene }, image_attached: config.vision }), draft, config.vision));
+    reviewerMessages.push(...phaseMessages(JSON.stringify({ task: round === 1 ? 'Compare this drawing with the original prompt.' : 'Review the updated drawing and verify each correction you requested in your previous review.', prompt: options.prompt, scene_id: sceneId, round, previous_review: pendingReview ?? null, draft: { scene: draft.scene }, image_attached: config.vision, ...(handoff ? { final_handoff: handoff } : {}) }), draft, config.vision));
     try {
       const response = await reviewer.generate({ messages: reviewerMessages, abortSignal: options.signal });
       // Persist the actual prepared context so a recovery stays effective in

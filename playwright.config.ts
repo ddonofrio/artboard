@@ -17,9 +17,14 @@ export default defineConfig({
     video: 'off',
     trace: 'off',
   },
-  webServer: {
+  webServer: [{
+    command: 'node --import tsx tests/fixtures/model-http-server.ts',
+    url: 'http://127.0.0.1:5189/health',
+    reuseExistingServer: false,
+  }, {
     command: 'npm run dev -- --port 5187 --strictPort',
     url: 'http://127.0.0.1:5187',
     reuseExistingServer: false,
-  },
+    env: { ARTBOARD_CONFIG_FILE: 'outputs/ui-config/agents.local.json', AGENT_BASE_URL: 'http://127.0.0.1:5189', AGENT_EDITOR_MODEL: 'test-model', AGENT_REVIEWER_MODEL: 'reviewer-model', AGENT_API_KEY: 'server-only-test-key', AGENT_MAX_REVIEWS: '2', AGENT_VISION: 'true' },
+  }],
 });

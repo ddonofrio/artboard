@@ -13,7 +13,10 @@ export default tseslint.config(
   boundaries(['src/core/**/*.ts'], '\\./|ajv$'),
   boundaries(['src/agents/**/*.ts'], '\\./|\\.\\./plugins/|\\.\\./core/|ai$|ajv$|@ai-sdk/openai-compatible$'),
   boundaries(['src/adapters/node/**/*.ts'], '\\./|\\.\\./\\.\\./core/|node:|pngjs$|jpeg-js$'),
-  boundaries(['src/ui/**/*.ts'], '\\./'),
+  boundaries(['src/ui/**/*.ts'], '\\./|\\.\\./contracts/'),
+  boundaries(['src/contracts/**/*.ts'], '\\./'),
+  boundaries(['src/workflows/**/*.ts'], '\\./|\\.\\./agents/|\\.\\./core/|\\.\\./contracts/'),
+  boundaries(['src/adapters/server/**/*.ts'], '\\./|\\.\\./node/|\\.\\./\\.\\./core/|\\.\\./\\.\\./agents/|\\.\\./\\.\\./workflows/|\\.\\./\\.\\./contracts/|node:'),
   {
     files: ['src/core/**/*.ts', 'src/agents/**/*.ts'],
     rules: { 'no-restricted-globals': ['error', 'window', 'document', 'localStorage', 'sessionStorage', 'navigator'] },

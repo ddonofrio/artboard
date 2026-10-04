@@ -1,4 +1,6 @@
 import './style.css';
+import { describeLayerAlgorithm } from './layer-algorithms';
+import { mountDrawingControls } from './drawing-controls';
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
 
@@ -12,7 +14,9 @@ app.innerHTML = `
         </div>
         <label class="checkbox-row"><input type="checkbox" id="batch"><span class="check-glyph" aria-hidden="true"></span>Batch (one prompt per line)</label>
         <label class="checkbox-row"><input type="checkbox" id="use-base"><span class="check-glyph" aria-hidden="true"></span>Edit the current scene</label>
-        <label class="layer-row" for="layer-count">Number of layers (1–9)<input id="layer-count" type="number" min="1" max="9" step="1" value="1" aria-label="Number of layers"></label>
+        <label class="layer-row" for="layer-count">Number of layers (1–9)<input id="layer-count" type="number" min="1" max="9" step="1" value="1" aria-label="Number of layers" aria-describedby="layer-algorithm"></label>
+        <p id="layer-algorithm" class="muted layer-algorithm" aria-live="polite"></p>
+        <button id="cancel-run" type="button" hidden>Cancel</button>
       </div>
     </section>
     <section class="panel canvas-panel" data-frame="double" data-title="CANVAS" aria-label="Canvas">
@@ -24,9 +28,9 @@ app.innerHTML = `
           <dl class="metrics"><div><dt>Tool calls</dt><dd>0</dd></div><div><dt>Successful calls</dt><dd>0</dd></div><div><dt>Failed calls</dt><dd>0</dd></div><div><dt>Retries</dt><dd>0</dd></div><div><dt>Avg. run time (s)</dt><dd>0.0</dd></div></dl>
         </section>
         <section class="box" data-frame="single" data-title="Real time log" aria-label="Real time log">
-          <p class="status">Not started</p>
-          <p>Enter a message and press Send.</p>
-          <p class="muted">Not started: no model calls yet.</p>
+          <p id="activity-log" class="log-clamped" aria-live="polite">No tool calls yet.</p>
+          <p id="workflow-log" class="status" aria-live="polite">Not started</p>
+          <p id="error-log" role="status">None</p>
         </section>
       </div>
     </section>
@@ -90,13 +94,17 @@ const observer = new ResizeObserver(entries => {
 });
 for (const element of frames.keys()) observer.observe(element);
 
-// Sending remains unconnected; this only reflects whether the input has text.
-const prompt = app.querySelector<HTMLTextAreaElement>('#prompt')!;
-const send = app.querySelector<HTMLButtonElement>('.prompt-send')!;
-prompt.addEventListener('input', () => { send.disabled = !prompt.value.trim(); });
-
 const layerCount = app.querySelector<HTMLInputElement>('#layer-count')!;
+const layerAlgorithm = app.querySelector<HTMLParagraphElement>('#layer-algorithm')!;
+const updateLayerAlgorithm = () => {
+  layerAlgorithm.textContent = describeLayerAlgorithm(Number(layerCount.value));
+};
+updateLayerAlgorithm();
+layerCount.addEventListener('input', updateLayerAlgorithm);
 layerCount.addEventListener('change', () => {
   const value = Number(layerCount.value);
   layerCount.value = String(Number.isFinite(value) ? Math.min(9, Math.max(1, Math.trunc(value))) : 1);
+  updateLayerAlgorithm();
 });
+
+mountDrawingControls(app);

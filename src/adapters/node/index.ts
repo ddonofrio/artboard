@@ -1,11 +1,10 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { resolve, sep } from 'node:path';
-import { PNG } from 'pngjs';
-import jpeg from 'jpeg-js';
 import { fail, type PixelImage, type Scene, type ToolAdapter } from '../../core/index.js';
+import { encodePNG } from './encoding.js';
 
-export function encodePNG(image: PixelImage): Buffer { return PNG.sync.write({ width: image.width, height: image.height, data: Buffer.from(image.data) } as PNG, { colorType: 6, inputColorType: 6 }); }
-export function encodeJPEG(image: PixelImage): Buffer { return jpeg.encode({ width: image.width, height: image.height, data: Buffer.from(image.data) }, 95).data; }
+export { encodePNG, encodeJPEG } from './encoding.js';
+export { OutputStore, drawingDate, drawingName, validateBatchOutput, type BatchOutput } from './outputs.js';
 export class NodeAdapter implements ToolAdapter {
   private root: string;
   constructor(directory = 'outputs') { this.root = resolve(directory); }
