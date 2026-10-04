@@ -7,9 +7,9 @@ test.beforeEach(async ({ page }) => {
 });
 
 test('the approved shell has three columns and no removed controls', async ({ page }) => {
-  await expect(page.locator('.workspace > .panel')).toHaveCount(3);
-  await expect(page.locator('.workspace > .panel[data-frame="double"]')).toHaveCount(3);
-  expect(await page.locator('.workspace > .panel').evaluateAll(panels => panels.map(panel => panel.getAttribute('data-title')))).toEqual(['PROMPT', 'CANVAS', 'MONITOR']);
+  await expect(page.locator('.workspace .panel')).toHaveCount(3);
+  await expect(page.locator('.workspace .panel[data-frame="double"]')).toHaveCount(3);
+  expect(await page.locator('.workspace .panel').evaluateAll(panels => panels.map(panel => panel.getAttribute('data-title')))).toEqual(['PROMPT', 'CANVAS', 'MONITOR']);
   expect(await page.locator('[aria-label="Monitor"] [data-title]').evaluateAll(boxes => boxes.map(box => box.getAttribute('data-title')))).toEqual(['Stats', 'Real time log']);
   await expect(page.locator('[data-title="Agent actions"]')).toHaveCount(0);
   await expect(page.locator('#agent-state')).toHaveText('idle');
@@ -20,10 +20,14 @@ test('the approved shell has three columns and no removed controls', async ({ pa
   await expect(page.locator('[aria-label="Prompt"] [data-title]')).toHaveCount(0);
   expect(await page.locator('.prompt-panel .checkbox-row').allTextContents()).toEqual(['Batch (one prompt per line)', 'Edit the current scene']);
   await expect(page.locator('#layer-count')).toHaveAttribute('min', '1');
-  await expect(page.locator('#layer-count')).toHaveAttribute('max', '9');
+  await expect(page.locator('#layer-count')).toHaveAttribute('max', '7');
+  await expect(page.locator('label[for="layer-count"]')).toContainText('Number of layers (1-7)');
+  expect(await page.locator('.model-picker + .reasoning-picker').count()).toBe(1);
   await expect(page.locator('.canvas-panel > canvas')).toHaveCount(1);
   await expect(page.locator('.canvas-panel [data-frame]')).toHaveCount(0);
   await expect(page.locator('.canvas-panel > :not(.frame)')).toHaveCount(1);
+  await expect(page.locator('.canvas-column > #agent-statistics')).toHaveCount(1);
+  await expect(page.locator('.canvas-panel #agent-statistics')).toHaveCount(0);
   await expect(page.locator('html')).toHaveAttribute('lang', 'en');
 });
 
@@ -86,7 +90,7 @@ test('Stats are numerical and prompt and monitor fit their content', async ({ pa
   const layers = page.locator('#layer-count');
   await layers.fill('14');
   await layers.dispatchEvent('change');
-  await expect(layers).toHaveValue('9');
+  await expect(layers).toHaveValue('7');
   await layers.fill('0');
   await layers.dispatchEvent('change');
   await expect(layers).toHaveValue('1');

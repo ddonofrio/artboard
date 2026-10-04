@@ -51,10 +51,12 @@ export class SceneError extends Error {
 export function fail(code: string, message: string, field?: string, operation?: number): never { throw new SceneError({ code, message, ...(field === undefined ? {} : { field }), ...(operation === undefined ? {} : { operation }) }); }
 function schemaCheck(validator: ReturnType<typeof ajv.compile>, value: unknown, field: string): void {
   if (validator(value)) return;
-  const errors = validator.errors ?? [];
-  // Select the branch matching kind/generator/material rather than a different union alternative.
-  const candidates = errors.filter(e => !['const', 'oneOf', 'required', 'additionalProperties'].includes(e.keyword));
-  const err = candidates.sort((a, b) => b.instancePath.length - a.instancePath.length)[0] ?? errors.find(e => e.keyword === 'additionalProperties') ?? errors[0];
+  const all = validator.errors ?? [];
+  // A mismatched discriminator excludes that union branch and its nested errors.
+  const rejected = all.filter(e => e.keyword === 'const').map(e => e.schemaPath.match(/^(.*\/(?:oneOf|anyOf)\/\d+)\/.*\/const$/)?.[1]).filter((path): path is string => !!path);
+  const errors = all.filter(e => !rejected.some(path => e.schemaPath.startsWith(path + '/')));
+  const candidates = errors.filter(e => !['const', 'oneOf', 'anyOf', 'required', 'additionalProperties'].includes(e.keyword));
+  const err = candidates.sort((a, b) => b.instancePath.length - a.instancePath.length)[0] ?? errors.find(e => e.keyword === 'required') ?? errors.find(e => e.keyword === 'additionalProperties') ?? errors[0] ?? all[0];
   const suffix = err?.keyword === 'additionalProperties' ? `/${String(err.params.additionalProperty)}` : err?.keyword === 'required' ? `/${String(err.params.missingProperty)}` : '';
   fail('VALIDATION', `${field}${err?.instancePath ?? ''}${suffix}: ${err?.message ?? 'invalid value'}`, `${field}${err?.instancePath ?? ''}${suffix}`);
 }

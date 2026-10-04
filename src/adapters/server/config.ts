@@ -15,7 +15,7 @@ export async function ensureAgentConfig(root: string, filename = 'agents.local.j
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 export function parseWorkflowConfig(value: unknown): WorkflowConfig {
   if (!object(value) || !object(value.connection) || !object(value.agents)) throw new Error('Agent configuration requires connection and agents objects.');
-  const keys = ['base_url', 'api_key', 'editor_model', 'reviewer_model', 'vision', 'max_reviews', 'max_output_tokens', 'timeout_ms'];
+  const keys = ['base_url', 'api_key', 'editor_model', 'reviewer_model', 'reasoning_effort', 'vision', 'vision_image_divisor', 'max_reviews', 'max_output_tokens', 'timeout_ms'];
   for (const key of Object.keys(value.connection)) if (!keys.includes(key)) throw new Error(`Unknown connection setting: ${key}.`);
   const connection = agentConfig(value.connection as Partial<AgentConfig>);
   const agents: Partial<Record<AgentRole, AgentProfile>> = {};

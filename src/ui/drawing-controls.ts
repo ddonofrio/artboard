@@ -1,7 +1,12 @@
-import type { DrawingEvent, PaintStyle } from '../contracts/service';
+import type { DrawingEvent, PaintStyle, ReasoningEffort } from '../contracts/service';
 import { fetchModels, streamDrawing } from './service';
-import { TimedLog } from './timed-log';
+import { activityText, thinkingLabel, TimedLog } from './timed-log';
 import { DrawingAnimation } from './scanline-animation';
+import { phaseStatus, stageStatus } from './workflow-status';
+import { AgentStatisticsLog } from './agent-statistics';
+
+const MODEL_STORAGE_KEY = 'artboard.selected-model';
+const REASONING_STORAGE_KEY = 'artboard.reasoning-effort';
 
 export function mountDrawingControls(app: HTMLElement): void {
   const prompt = app.querySelector<HTMLTextAreaElement>('#prompt')!;
@@ -11,11 +16,27 @@ export function mountDrawingControls(app: HTMLElement): void {
   const batch = app.querySelector<HTMLInputElement>('#batch')!;
   const edit = app.querySelector<HTMLInputElement>('#use-base')!;
   const model = app.querySelector<HTMLSelectElement>('#model-select')!;
+  const reasoning = app.querySelector<HTMLSelectElement>('#reasoning-select')!;
+  const imageDivisor = app.querySelector<HTMLInputElement>('#image-divisor')!;
+  try {
+    const saved = window.localStorage.getItem(REASONING_STORAGE_KEY);
+    if (saved && ['none', 'low', 'medium', 'high'].includes(saved)) reasoning.value = saved;
+  } catch { /* Browser storage is optional. */ }
+  reasoning.addEventListener('change', () => {
+    try { window.localStorage.setItem(REASONING_STORAGE_KEY, reasoning.value); }
+    catch { /* Keep the selected effort usable without storage. */ }
+  });
   const refreshModels = app.querySelector<HTMLButtonElement>('#refresh-models')!;
   const status = app.querySelector<HTMLElement>('.status')!;
   const activity = app.querySelector<HTMLElement>('#activity-log')!;
   const agentState = app.querySelector<HTMLElement>('#agent-state')!;
-  const activityLog = new TimedLog(item => { activity.dataset.kind = item.kind.toLowerCase(); activity.textContent = item.text; });
+  const statistics = app.querySelector<HTMLElement>('#agent-statistics')!;
+  const statisticsLog = new AgentStatisticsLog();
+  statistics.textContent = statisticsLog.text();
+  const activityLog = new TimedLog(item => {
+    activity.dataset.kind = item.kind.toLowerCase(); activity.textContent = activityText(item);
+    activity.scrollTop = item.kind === 'Thinking' ? activity.scrollHeight : 0;
+  });
   const reportError = (message: string) => {
     if (activity.dataset.lastError === message) return;
     activity.dataset.lastError = message;
@@ -38,14 +59,10 @@ export function mountDrawingControls(app: HTMLElement): void {
   let counts = [0, 0, 0, 0];
   let totalDuration = 0, completed = 0;
   let batchPosition = '';
-  const stageActions: Record<string, string> = {
-    Artist: 'Creating the scene', Background: 'Creating the background', 'Distant background': 'Creating the distant background',
-    Setting: 'Building the setting', 'Main content': 'Creating the main content', Foreground: 'Adding foreground elements',
-    Decorator: 'Decorating the layers', Specialist: 'Adding specialized details', 'Final integrator': 'Integrating lighting, color and layers',
-  };
+  let workflowLayers = 1;
   const refresh = () => {
-    send.disabled = !!controller || loadingModels || !model.value || !prompt.value.trim() || !Number.isInteger(Number(layers.value)) || Number(layers.value) < 1 || Number(layers.value) > 6;
-    for (const control of [prompt, layers, batch, edit]) control.disabled = !!controller;
+    send.disabled = !!controller || loadingModels || !model.value || !prompt.value.trim() || !Number.isInteger(Number(layers.value)) || Number(layers.value) < 1 || Number(layers.value) > 7 || !Number.isInteger(Number(imageDivisor.value)) || Number(imageDivisor.value) < 1 || Number(imageDivisor.value) > 64;
+    for (const control of [prompt, layers, batch, edit, reasoning, imageDivisor]) control.disabled = !!controller;
     model.disabled = !!controller || loadingModels || !model.value;
     refreshModels.disabled = !!controller || loadingModels;
     cancel.hidden = !controller;
@@ -56,7 +73,11 @@ export function mountDrawingControls(app: HTMLElement): void {
   };
   const loadModels = async () => {
     loadingModels = true; refresh();
-    const selected = model.value;
+    let selected = model.value;
+    if (!selected) {
+      try { selected = window.localStorage.getItem(MODEL_STORAGE_KEY) || ''; }
+      catch { /* Browser storage may be unavailable; server defaults still work. */ }
+    }
     try {
       const list = await fetchModels(discovery.signal);
       const options = list.models.map(id => { const option = document.createElement('option'); option.value = id; option.textContent = id; return option; });
@@ -73,7 +94,13 @@ export function mountDrawingControls(app: HTMLElement): void {
     } finally { loadingModels = false; refresh(); }
   };
   refreshModels.addEventListener('click', () => { void loadModels(); });
-  model.addEventListener('change', refresh);
+  model.addEventListener('change', () => {
+    if (model.value) {
+      try { window.localStorage.setItem(MODEL_STORAGE_KEY, model.value); }
+      catch { /* Keep the current selection usable when browser storage is unavailable. */ }
+    }
+    refresh();
+  });
   const preview = async (image: string, signal: AbortSignal, group?: string, style?: PaintStyle) => {
     if (!/^data:image\/(jpeg|png);base64,/.test(image)) throw new Error('Invalid drawing preview.');
     const picture = new Image(); picture.src = image;
@@ -86,11 +113,15 @@ export function mountDrawingControls(app: HTMLElement): void {
   };
   const receive = async (event: DrawingEvent, signal: AbortSignal) => {
     switch (event.type) {
-      case 'state': agentState.textContent = event.state.replaceAll('_', ' ') + (event.tool ? ` (${event.tool})` : ''); break;
-      case 'stage': status.textContent = `${batchPosition}${stageActions[event.name] || event.name} (${event.index}/${event.total}).`; break;
-      case 'phase': if (event.role === 'reviewer') status.textContent = `${batchPosition}Validating the scene (review ${event.round}).`; else if (event.round > 1) { counts[3]++; updateMetrics(); status.textContent = `${batchPosition}Applying review corrections (${event.round}).`; } break;
-      case 'tool': counts[0]++; counts[event.ok ? 1 : 2]++; activityLog.enqueue({ kind: 'Tools', text: `${event.name} ${JSON.stringify(event.input)}` }); if (!event.ok) reportError(event.message || `${event.name} failed.`); updateMetrics(); break;
-      case 'thinking': activityLog.enqueue({ kind: 'Thinking', text: event.text }); break;
+      case 'statistics': statisticsLog.update(event); statistics.textContent = statisticsLog.text(); statistics.title = statistics.textContent; break;
+      case 'state': agentState.textContent = event.state === 'thinking' ? 'thinking (… tokens)' : event.state.replaceAll('_', ' ') + (event.tool ? ` (${event.tool})` : ''); break;
+      case 'stage': workflowLayers = event.total; status.textContent = batchPosition + stageStatus(event.name, event.index, event.total); break;
+      case 'phase': if (event.role === 'reviewer') status.textContent = batchPosition + phaseStatus(event.role, event.round, workflowLayers); else if (event.round > 1) { counts[3]++; updateMetrics(); status.textContent = batchPosition + phaseStatus(event.role, event.round, workflowLayers); } break;
+      case 'tool_input': activityLog.enqueue({ id: event.id, kind: 'Tools', text: `${event.name} ${event.input}` }); break;
+      case 'tool': counts[0]++; counts[event.ok ? 1 : 2]++; activityLog.enqueue({ id: event.id, kind: 'Tools', text: `${event.name} ${JSON.stringify(event.input)}` }); if (!event.ok) reportError(event.message || `${event.name} failed.`); updateMetrics(); break;
+      case 'thinking':
+        if (agentState.textContent?.startsWith('thinking')) agentState.textContent = thinkingLabel(event.tokens, event.tokens_estimated).toLowerCase();
+        activityLog.enqueue({ id: event.id, kind: 'Thinking', text: event.text, tokens: event.tokens, tokens_estimated: event.tokens_estimated }); break;
       case 'execution_error': reportError(event.message); break;
       case 'preview': await preview(event.image, signal, event.group, event.style); break;
       case 'review': break;
@@ -98,7 +129,7 @@ export function mountDrawingControls(app: HTMLElement): void {
       case 'final':
         if (event.output_path) canvas.dataset.outputPath = event.output_path;
         sceneId = event.scene_id; completed++; totalDuration += event.duration_ms; updateMetrics();
-        status.textContent = event.approved ? 'Approved' : event.stop_reason === 'review_limit' ? 'Review limit reached' : 'Incomplete';
+        status.textContent = event.approved ? 'Approved' : event.stop_reason === 'unreviewed' ? 'Completed' : event.stop_reason === 'review_limit' ? 'Review limit reached' : 'Incomplete';
         if (event.error) reportError(event.error); break;
       case 'error': throw new Error(event.message);
     }
@@ -106,6 +137,8 @@ export function mountDrawingControls(app: HTMLElement): void {
   prompt.addEventListener('input', refresh);
   layers.addEventListener('input', refresh);
   layers.addEventListener('change', refresh);
+  imageDivisor.addEventListener('input', refresh);
+  imageDivisor.addEventListener('change', refresh);
   cancel.addEventListener('click', () => controller?.abort());
   send.addEventListener('click', async () => {
     if (controller || send.disabled) return;
@@ -113,15 +146,18 @@ export function mountDrawingControls(app: HTMLElement): void {
     const prompts = batch.checked ? prompt.value.split(/\r?\n/).map(value => value.trim()).filter(Boolean) : [prompt.value.trim()];
     const baseId = edit.checked ? sceneId : undefined;
     const selectedModel = model.value;
+    const selectedReasoning = reasoning.value as ReasoningEffort | '';
+    const selectedImageDivisor = Number(imageDivisor.value);
     const batchId = batch.checked ? crypto.randomUUID() : undefined;
     const current = new AbortController(); controller = current;
+    statisticsLog.reset(); statistics.textContent = statisticsLog.text(); statistics.title = statistics.textContent;
     counts = [0, 0, 0, 0]; totalDuration = 0; completed = 0; delete activity.dataset.lastError; agentState.textContent = 'processing prompt'; updateMetrics(); refresh();
     try {
       for (const [index, text] of prompts.entries()) {
         current.signal.throwIfAborted();
         batchPosition = prompts.length > 1 ? `Drawing ${index + 1}/${prompts.length}: ` : '';
         let incomplete = false;
-        await streamDrawing({ prompt: text, layers: Number(layers.value), model: selectedModel, ...(baseId ? { scene_id: baseId } : {}), ...(batchId ? { batch: { id: batchId, index: index + 1 } } : {}) }, current.signal, async event => {
+        await streamDrawing({ prompt: text, layers: Number(layers.value), model: selectedModel, vision_image_divisor: selectedImageDivisor, ...(selectedReasoning ? { reasoning_effort: selectedReasoning } : {}), ...(baseId ? { scene_id: baseId } : {}), ...(batchId ? { batch: { id: batchId, index: index + 1 } } : {}) }, current.signal, async event => {
           await receive(event, current.signal);
           if (event.type === 'final' && event.stop_reason === 'incomplete') incomplete = true;
         });

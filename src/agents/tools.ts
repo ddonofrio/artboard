@@ -1,6 +1,7 @@
 import Ajv from 'ajv';
 import { jsonSchema, tool, type ToolSet } from 'ai';
-import { generators, materials, objectSchema, sceneObjectSchema, toolSchemas, type SceneTools, type ToolResult } from '../core/index.js';
+import { generators, materials, number, objectSchema, pointSchema, sceneObjectSchema, toolSchemas, type SceneTools, type ToolResult } from '../core/index.js';
+import { normalizeGeometry } from './geometry.js';
 
 export interface Handoff { done: string[]; not_done: { item: string; reason: string }[] }
 export interface DraftSubmission { revision: number; done?: Handoff['done']; not_done?: Handoff['not_done'] }
@@ -20,20 +21,45 @@ const error = (message: string): ToolResult => ({ ok: false, error: { code: 'AGE
 const objectVariants = sceneObjectSchema.oneOf as { properties: Record<string, Record<string, unknown>> }[];
 const drawingProperties = {
   ...objectVariants[0].properties,
-  kind: { type: 'string', enum: ['polygon', 'ellipse', 'line', 'procedural', 'sprite'] },
-  points: objectVariants[1].properties.points,
-  bounds: objectVariants[2].properties.bounds,
+  kind: { type: 'string', enum: ['circle', 'rect', 'rectangle', 'polygon', 'ellipse', 'line', 'procedural', 'sprite'] },
+  points: { anyOf: [objectVariants[1].properties.points, objectVariants[2].properties.bounds], description: 'Polygon/line vertices. For ellipse, procedural or sprite, also accepts bounding corners or [x,y,width,height].' },
+  bounds: { ...objectVariants[2].properties.bounds, description: '[x,y,width,height], measured from the top-left of the canvas.' },
+  center: { ...pointSchema, description: 'Circle/ellipse center [x,y], in canvas pixels.' },
+  radius: { ...number(0.5, 2048), description: 'Circle radius in pixels.' },
+  rect: { ...objectVariants[2].properties.bounds, description: 'Rectangle/ellipse [x,y,width,height], as in pygame.draw.' },
+  xy: { anyOf: [objectVariants[1].properties.points, { type: 'array', items: number(-4096, 4096), minItems: 4, maxItems: 4 }], description: 'Pillow-style corners for ellipse/rectangle (inclusive endpoints), or polygon/line vertices.' },
+  bbox: { anyOf: [objectVariants[1].properties.points, { type: 'array', items: number(-4096, 4096), minItems: 4, maxItems: 4 }], description: 'Bounding corners [x0,y0,x1,y1] or [[x0,y0],[x1,y1]], with exclusive far edges.' },
+  x: number(-4096, 4096), y: number(-4096, 4096), width: number(0, 4096), height: number(0.5, 4096),
+  cx: number(-4096, 4096), cy: number(-4096, 4096), r: number(0.5, 2048), rx: number(0.5, 2048), ry: number(0.5, 2048),
+  start: pointSchema, end: pointSchema,
+  fill: { ...objectVariants[0].properties.color, description: 'Fill color as a palette index; alias for color.' },
   generator: { type: 'string', enum: Object.keys(generators) },
   asset: objectVariants[3].properties.asset,
   params: { type: 'object', additionalProperties: true, description: 'Generator parameters from scene_catalog category=objects and id=generator.' },
   material: objectSchema({ id: { type: 'string', enum: Object.keys(materials) }, params: { type: 'object', additionalProperties: true } }, ['id']),
 };
-const drawingSchema = objectSchema(drawingProperties, ['id', 'kind', 'layer']);
-drawingSchema.description = 'All drawing fields live in this object, including optional outline and material. Never place drawing fields beside object in the add operation.';
+const drawingSchema = objectSchema(drawingProperties, ['id', 'kind']);
+drawingSchema.description = 'Circle: center and radius. Rectangle: rect or x,y,width,height. Ellipse: bounds or xy. Polygon/line: points. Coordinates start at the top-left; colors are palette indices; layer defaults to 0, higher layers paint on top.';
 const operationsSchema = structuredClone((toolSchemas.scene_apply.inputSchema.properties as Record<string, Record<string, unknown>>).operations);
-operationsSchema.maxItems = 8;
 const operationVariants = (operationsSchema.items as { oneOf: { properties: Record<string, unknown> }[] }).oneOf;
 operationVariants[0].properties.object = drawingSchema;
+const changesProperties = { ...drawingProperties } as Record<string, Record<string, unknown>>;
+for (const field of ['id', 'kind', 'generator', 'asset']) delete changesProperties[field];
+operationVariants[1].properties.changes = { ...objectSchema(changesProperties), minProperties: 1 };
+
+export function toolUsage(name: string): string {
+  const usage: Record<string, string> = {
+    scene_catalog: 'Use category=palettes/materials/objects/assets and optionally id for one entry.',
+    scene_inspect: 'Use the supplied scene_id; omit ids for a summary or pass existing object IDs in ids.',
+    scene_apply: 'Use operations=[{op:"add",object:{id,kind,...}},{op:"update",id,changes:{...}}]. Circle: center:[x,y],radius; ellipse: bounds:[x,y,width,height] or points with bounding corners; rectangle: kind:"rect",rect:[x,y,width,height]; polygon: points with at least 3 [x,y] vertices; line: at least 2. Coordinates start at the top-left. Colors are palette indices. The failed batch was not applied.',
+    scene_render: 'Call alone with the supplied scene_id; optional crop=[x,y,width,height] must fit the canvas and scale is an integer 1-4.',
+    scene_history: 'Use action="undo" or "redo" and steps=1..64, no more than the available history.',
+    scene_io: 'Use action="palette" and palette as a catalog ID or {id,name,colors:["#RRGGBB",...]}, with 1-16 colors.',
+    finish_draft: 'Call alone with the current revision; workflow submissions also need done:[...] and not_done:[{item,reason}]. Complete drawing before submitting.',
+    submit_review: 'Call alone with the submitted revision, approved:boolean and issues:[{object_id,instruction}]. Approval requires no issues; rejection needs 1-3 concrete corrections using existing IDs or "scene".',
+  };
+  return usage[name] ?? 'Use an advertised function name and its JSON argument schema; the canvas already exists.';
+}
 
 function misplacedObjectField(args: Record<string, unknown>): string | undefined {
   if (!Array.isArray(args.operations)) return;
@@ -54,7 +80,7 @@ function misplacedObjectField(args: Record<string, unknown>): string | undefined
 }
 
 /** Thin SDK adapters around the existing tool dispatcher, not a second tool runtime. */
-export function agentTools(host: SceneTools, sceneId: string, role: 'editor' | 'reviewer', signal: AbortSignal | undefined, onTool: (name: string, result: ToolResult, input: Record<string, unknown>) => void | Promise<void>, onDraft: (draft: DraftSubmission) => void, onReview: (review: Review) => void, submissionError: (revision: number) => string | undefined = () => undefined, requireHandoff = false, onStart: (name: string) => void | Promise<void> = () => {}, vision = true): ToolSet {
+export function agentTools(host: SceneTools, sceneId: string, role: 'editor' | 'reviewer', signal: AbortSignal | undefined, onTool: (name: string, result: ToolResult, input: Record<string, unknown>, appliedInput?: Record<string, unknown>) => void | Promise<void>, onDraft: (draft: DraftSubmission) => void, onReview: (review: Review) => void, submissionError: (revision: number) => string | undefined = () => undefined, requireHandoff = false, onStart: (name: string) => void | Promise<void> = () => {}, vision = true, reviewEnabled = true): ToolSet {
   const result: ToolSet = {};
   // Local models can return several calls despite parallel_tool_calls=false.
   // Serialize adapter executions, including presentation of each preview.
@@ -64,7 +90,7 @@ export function agentTools(host: SceneTools, sceneId: string, role: 'editor' | '
     pending = next.catch(() => {});
     return next;
   };
-  const names = (role === 'editor' ? ['scene_catalog', 'scene_create', 'scene_inspect', 'scene_apply', 'scene_render', 'scene_history', 'scene_io'] : ['scene_catalog', 'scene_inspect', 'scene_render']).filter(name => vision || name !== 'scene_render');
+  const names = (role === 'editor' ? ['scene_catalog', 'scene_inspect', 'scene_apply', 'scene_render', 'scene_history', 'scene_io'] : ['scene_catalog', 'scene_inspect', 'scene_render']).filter(name => vision || name !== 'scene_render');
   for (const name of names) {
     const original = toolSchemas[name];
     // The full polymorphic object schema is large. Discovery supplies precise
@@ -84,26 +110,27 @@ export function agentTools(host: SceneTools, sceneId: string, role: 'editor' | '
       schema.required = ['scene_id', 'action', 'palette'];
     }
     result[name] = tool({
-      description: name === 'scene_render' ? 'Look at the drawing on demand. The requested image is supplied once in your next model request; call again for another look. Supports the render options below.' : name === 'scene_create' ? 'Create an EMPTY drawing surface. Build scenery progressively with scene_apply. No recipes or prebuilt scenes.' : name === 'scene_io' ? 'Set an editable palette with action=palette. Other file operations are unavailable to agents.' : original.description,
+      description: name === 'scene_render' ? 'Request an image for the next model response. Call alone. Supports crop and scale.' : name === 'scene_create' ? 'Create an empty canvas.' : name === 'scene_io' ? 'Change the scene palette.' : original.description,
       inputSchema: jsonSchema<Record<string, unknown>>(schema),
       execute: args => sequential(async () => {
         signal?.throwIfAborted();
         await onStart(name);
         signal?.throwIfAborted();
         let output: ToolResult;
+        let appliedInput: Record<string, unknown> | undefined;
         if (typeof args.scene_id === 'string' && /<\/?(?:parameter|function|tool_call)\b/.test(args.scene_id)) output = error(`Malformed tool arguments: XML tool tags are embedded in scene_id. Use one API function call with valid JSON arguments; scene_id must be exactly "${sceneId}". Do not place tool markup or another call inside a string.`);
         else if (args.scene_id !== undefined && args.scene_id !== sceneId) output = error(`Only scene_id ${sceneId} is available in this run. Retry ${name} with scene_id exactly "${sceneId}"; do not create or reference another scene ID.`);
         else if (name === 'scene_create' && ('recipe' in args || 'recipe_params' in args)) output = error('Agents create empty scenes only. Build the requested scenery with scene_apply in small batches.');
-        else if (name === 'scene_apply' && Array.isArray(args.operations) && args.operations.length > 8) output = error('Use at most 8 operations per call so each part of the composition is visible.');
         else if (name === 'scene_io' && args.action !== 'palette') output = error('Agents can only use scene_io to change the palette.');
         else if (name === 'scene_catalog' && args.category === 'recipes') output = error('Prebuilt scenes are unavailable to agents. Compose objects with scene_apply instead.');
         else if (name === 'scene_catalog' && (!args.category || args.category === 'tools')) output = { ok: true, result: { message: 'Choose category palettes, materials, objects, or assets. Query a single ID for details. Primitive kinds: polygon, ellipse, line; procedural kinds use the objects catalog.', categories: ['palettes', 'materials', 'objects', 'assets'] } };
         else if (name === 'scene_apply' && misplacedObjectField(args)) output = error(misplacedObjectField(args)!);
-        else output = await host.dispatch({ tool: name, arguments: args });
-        if (!output.ok && name === 'scene_apply') {
-          output.error.message += ' Correct the rejected field and retry a small batch; no operations from this batch were applied. Polygon/line geometry uses points; circles use kind=ellipse with bounds. Color belongs inside object and must be a valid palette index. For generator/material parameters, consult scene_catalog with the relevant category and ID instead of repeating the same invalid call.';
+        else {
+          appliedInput = name === 'scene_apply' ? normalizeGeometry(args, host) : args;
+          output = await host.dispatch({ tool: name, arguments: appliedInput });
         }
-        await onTool(name, output, args);
+        if (!output.ok && !output.error.message.includes('Usage:')) output.error.message = `${name}: ${output.error.message} Usage: ${toolUsage(name)}`;
+        await onTool(name, output, args, output.ok ? appliedInput : undefined);
         // Only an explicit render requests vision. Keep bytes out of prose;
         // orchestration attaches this exact render once as a real image part.
         if (name === 'scene_render' && output.ok) output = { ok: true, result: { ...output.result, image_ref: 'Requested image supplied once in the next model request. Call scene_render again for another look.' } };
@@ -113,7 +140,7 @@ export function agentTools(host: SceneTools, sceneId: string, role: 'editor' | '
   }
   const name = role === 'editor' ? 'finish_draft' : 'submit_review';
   result[name] = tool({
-    description: role === 'editor' ? 'Submit only the completed drawing revision to the independent reviewer. No narrative or choices. Call alone, after edits.' : 'Approve this exact drawing revision or return minimal drawing corrections. Read-only; call alone.',
+    description: role === 'editor' ? (reviewEnabled ? 'Submit the completed revision for review. Call alone.' : 'Deliver the completed revision. Call alone.') : 'Approve the submitted revision or return corrections. Call alone.',
     inputSchema: jsonSchema<Record<string, unknown>>(role === 'editor' ? (requireHandoff ? stageSubmissionSchema : draftSubmissionSchema) : reviewSchema),
     execute: value => sequential(async () => {
       signal?.throwIfAborted();
@@ -142,6 +169,7 @@ export function agentTools(host: SceneTools, sceneId: string, role: 'editor' | '
           else { onReview(structuredClone(review)); output = { ok: true, result: { revision: scene.revision, submitted: true } }; }
         }
       }
+      if (!output.ok) output.error.message = `${name}: ${output.error.message} Usage: ${toolUsage(name)}`;
       await onTool(name, output, value);
       return output;
     }),

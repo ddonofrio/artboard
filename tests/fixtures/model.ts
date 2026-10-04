@@ -1,6 +1,9 @@
 import type { Scene } from '../../src/core/types';
 
 export interface ChatRequest {
+  stream?: boolean;
+  stream_options?: { include_usage: boolean };
+  reasoning_effort?: string;
   model: string;
   messages: { role: string; content: string | { type: string; text?: string; image_url?: { url: string } }[] | null }[];
   tools: { function: { name: string } }[];
@@ -62,7 +65,9 @@ export function mockModel() {
     }
     return Response.json({ id: `chat-${requests.length}`, object: 'chat.completion', created: 1, model: request.model,
       choices: [{ index: 0, finish_reason: 'tool_calls', message: { role: 'assistant', content: null, ...(context.prompt.includes('[thinking]') ? { reasoning_content: 'Inspect the requested scene and place each element in its assigned layer. '.repeat(20) } : {}), tool_calls: [{ name, args }, ...extraCalls].map((call, index) => ({ id: `call-${requests.length}-${index}`, type: 'function', function: { name: call.name, arguments: JSON.stringify(call.args) } })) } }],
-      usage: { prompt_tokens: 50, completion_tokens: 25, total_tokens: 75 },
+      usage: context.prompt.includes('[thinking]')
+        ? { prompt_tokens: 50, completion_tokens: 600, total_tokens: 650, completion_tokens_details: { reasoning_tokens: 512 } }
+        : { prompt_tokens: 50, completion_tokens: 25, total_tokens: 75 },
     });
   };
   return { fetcher, requests };

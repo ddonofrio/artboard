@@ -4,9 +4,10 @@ test.beforeEach(async ({ page, request }) => {
   await request.post('http://127.0.0.1:5189/reset');
   await page.goto('/');
   await expect(page.getByRole('combobox', { name: 'Model' })).toBeEnabled();
+  await page.locator('#layer-count').fill('2');
 });
 
-for (let layers = 1; layers <= 6; layers++) test(`${layers}-layer workflow renders a drawing and corrects only with the final artist`, async ({ page, request }) => {
+for (let layers = 2; layers <= 7; layers++) test(`workflow ${layers} renders a drawing and corrects only with the final artist`, async ({ page, request }) => {
   await page.locator('#layer-count').fill(String(layers));
   await expect(page.locator('#layer-algorithm')).toContainText('Reviewer');
   await page.getByRole('textbox', { name: 'Prompt' }).fill('Draw a landscape and a subject [reject]');
@@ -14,13 +15,13 @@ for (let layers = 1; layers <= 6; layers++) test(`${layers}-layer workflow rende
   await expect(page.locator('.status')).toHaveText('Approved');
   await expect(page.getByRole('button', { name: 'Cancel' })).toBeHidden();
   const values = await page.locator('.metrics dd').allTextContents();
-  expect(Number(values[0])).toBeGreaterThan(layers * 2);
+  expect(Number(values[0])).toBeGreaterThan((layers - 1) * 2);
   expect(Number(values[3])).toBe(1);
   expect(await page.locator('canvas').evaluate((canvas: HTMLCanvasElement) => canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height).data.some(value => value !== 0))).toBe(true);
   const requests = await (await request.get('http://127.0.0.1:5189/requests')).json();
   const stages = new Set(requests.filter((item: { workflow?: unknown }) => item.workflow).map((item: { workflow: { stage_index: number } }) => item.workflow.stage_index));
-  expect(stages.size).toBe(layers);
-  expect(requests.filter((item: { workflow?: unknown; round: number }) => item.workflow && item.round === 2).every((item: { workflow: { stage_index: number } }) => item.workflow.stage_index === layers)).toBe(true);
+  expect(stages.size).toBe(layers - 1);
+  expect(requests.filter((item: { workflow?: unknown; round: number }) => item.workflow && item.round === 2).every((item: { workflow: { stage_index: number } }) => item.workflow.stage_index === layers - 1)).toBe(true);
   await expect(page.locator('#agent-state')).toHaveText('idle');
 });
 
@@ -41,6 +42,72 @@ test('the model combo applies a selection to one Send operation and accepts a di
   const requests = await (await request.get('http://127.0.0.1:5189/requests')).json();
   expect(requests.filter((item: { prompt: string }) => item.prompt === 'First selected model').every((item: { model: string }) => item.model === 'second-model')).toBe(true);
   expect(requests.filter((item: { prompt: string }) => item.prompt === 'Next selected model').every((item: { model: string }) => item.model === 'test-model')).toBe(true);
+});
+
+test('the selected model survives reload and refresh', async ({ page }) => {
+  const model = page.getByRole('combobox', { name: 'Model' });
+  await model.selectOption('second-model');
+  expect(await page.evaluate(() => localStorage.getItem('artboard.selected-model'))).toBe('second-model');
+  await page.reload();
+  await expect(model).toBeEnabled();
+  await expect(model).toHaveValue('second-model');
+  await page.getByRole('button', { name: 'Refresh models' }).click();
+  await expect(model).toBeEnabled();
+  await expect(model).toHaveValue('second-model');
+});
+
+test('workflow 1 completes without reviewer requests', async ({ page, request }) => {
+  await page.locator('#layer-count').fill('1');
+  await expect(page.locator('#layer-algorithm')).toContainText('without a reviewer');
+  await page.getByRole('textbox', { name: 'Prompt' }).fill('A scene [reject]');
+  await page.getByRole('button', { name: 'Send' }).click();
+  await expect(page.locator('.status')).toHaveText('Completed');
+  const requests = await (await request.get('http://127.0.0.1:5189/requests')).json();
+  expect(requests.every((item: { workflow?: { review_enabled: boolean } }) => item.workflow?.review_enabled === false)).toBe(true);
+});
+
+test('reasoning and image size controls are captured per turn and reasoning survives reload', async ({ page }) => {
+  const reasoning = page.getByRole('combobox', { name: 'Reasoning level' });
+  await expect(reasoning.locator('option')).toHaveText(['Default', 'Off', 'Low', 'Medium', 'High']);
+  await reasoning.selectOption('none');
+  await page.reload();
+  await expect(page.getByRole('combobox', { name: 'Model' })).toBeEnabled();
+  await expect(reasoning).toHaveValue('none');
+  const size = page.getByRole('spinbutton', { name: 'Image size divisor' });
+  await expect(size).toHaveValue('4');
+  await size.fill('2');
+  await page.getByRole('textbox', { name: 'Prompt' }).fill('A scene');
+  const sent = page.waitForRequest(item => item.url().endsWith('/api/runs'));
+  await page.getByRole('button', { name: 'Send' }).click();
+  const body = (await sent).postDataJSON();
+  expect(body.reasoning_effort).toBe('none'); expect(body.vision_image_divisor).toBe(2);
+  await expect(page.locator('.status')).toHaveText('Completed');
+  await reasoning.selectOption('');
+  const next = page.waitForRequest(item => item.url().endsWith('/api/runs'));
+  await page.getByRole('button', { name: 'Send' }).click();
+  expect((await next).postDataJSON().reasoning_effort).toBeUndefined();
+});
+
+test('a saved model that is no longer advertised falls back to the server preference', async ({ page }) => {
+  await page.evaluate(() => localStorage.setItem('artboard.selected-model', 'unloaded-model'));
+  await page.reload();
+  const model = page.getByRole('combobox', { name: 'Model' });
+  await expect(model).toBeEnabled();
+  await expect(model).toHaveValue('test-model');
+  await model.selectOption('second-model');
+  expect(await page.evaluate(() => localStorage.getItem('artboard.selected-model'))).toBe('second-model');
+});
+
+test('model selection remains usable if browser storage access is denied', async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(window, 'localStorage', { get() { throw new DOMException('Storage denied', 'SecurityError'); } });
+  });
+  await page.reload();
+  const model = page.getByRole('combobox', { name: 'Model' });
+  await expect(model).toBeEnabled();
+  await model.selectOption('second-model');
+  await page.getByRole('textbox', { name: 'Prompt' }).fill('A scene');
+  await expect(page.getByRole('button', { name: 'Send' })).toBeEnabled();
 });
 
 test('batch input runs sequential drawings and edit uses the last retained scene', async ({ page, request }) => {
@@ -91,7 +158,7 @@ test('review exhaustion, incomplete results and errors are distinct and errors h
 
 test('undefined workflows cannot start and editing requires a current drawing', async ({ page, request }) => {
   await page.getByRole('textbox', { name: 'Prompt' }).fill('Scene');
-  for (const layers of [7, 8, 9]) {
+  for (const layers of [8, 9]) {
     await page.locator('#layer-count').fill(String(layers));
     await expect(page.locator('#layer-algorithm')).toContainText('Not defined');
     await expect(page.getByRole('button', { name: 'Send' })).toBeDisabled();
@@ -116,10 +183,13 @@ test('the three logs separate activity, workflow and errors; bursts hold each en
   const colors = await log.locator(':scope > p').evaluateAll(elements => elements.map(element => getComputedStyle(element).color));
   expect(new Set(colors).size).toBe(1);
   await expect(page.locator('#activity-log')).toHaveAttribute('data-kind', 'thinking');
+  await expect(page.locator('#activity-log')).toContainText('Thinking:');
+  await expect(page.locator('#activity-log')).not.toContainText('tokens');
   await expect(page.locator('#activity-log')).toContainText('Inspect the requested scene');
   await expect(page.locator('#agent-state')).toHaveText('idle');
-  const clipping = await page.locator('#activity-log').evaluate(element => ({ height: element.getBoundingClientRect().height, clamp: getComputedStyle(element).webkitLineClamp, content: element.scrollHeight }));
+  const clipping = await page.locator('#activity-log').evaluate(element => ({ height: element.getBoundingClientRect().height, clamp: getComputedStyle(element).webkitLineClamp, content: element.scrollHeight, top: element.scrollTop, visible: element.clientHeight }));
   expect(clipping.height).toBeLessThanOrEqual(32); expect(clipping.clamp).toBe('2'); expect(clipping.content).toBeGreaterThan(clipping.height);
+  expect(clipping.top + clipping.visible).toBeGreaterThanOrEqual(clipping.content - 1);
   await page.clock.runFor(999); await expect(page.locator('#activity-log')).toHaveAttribute('data-kind', 'thinking');
   await page.clock.runFor(1); await expect(page.locator('#activity-log')).toHaveAttribute('data-kind', 'tools');
   await expect(page.locator('#activity-log')).toContainText('scene_create');

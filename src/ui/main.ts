@@ -19,16 +19,24 @@ app.innerHTML = `
             <button id="refresh-models" type="button" aria-label="Refresh models">Refresh</button>
           </div>
         </div>
+        <div class="model-picker reasoning-picker">
+          <label for="reasoning-select">Reasoning level</label>
+          <div class="field-box" data-frame="single"><select id="reasoning-select"><option value="">Default</option><option value="none">Off</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select></div>
+        </div>
         <label class="checkbox-row"><input type="checkbox" id="batch"><span class="check-glyph" aria-hidden="true"></span>Batch (one prompt per line)</label>
+        <label class="layer-row" for="image-divisor">Image size: 1 /<input id="image-divisor" type="number" min="1" max="64" step="1" value="4" aria-label="Image size divisor"></label>
         <label class="checkbox-row"><input type="checkbox" id="use-base"><span class="check-glyph" aria-hidden="true"></span>Edit the current scene</label>
-        <label class="layer-row" for="layer-count">Number of layers (1–9)<input id="layer-count" type="number" min="1" max="9" step="1" value="1" aria-label="Number of layers" aria-describedby="layer-algorithm"></label>
+        <label class="layer-row" for="layer-count">Number of layers (1-7)<input id="layer-count" type="number" min="1" max="7" step="1" value="1" aria-label="Number of layers" aria-describedby="layer-algorithm"></label>
         <p id="layer-algorithm" class="muted layer-algorithm" aria-live="polite"></p>
         <button id="cancel-run" type="button" hidden>Cancel</button>
       </div>
     </section>
-    <section class="panel canvas-panel" data-frame="double" data-title="CANVAS" aria-label="Canvas">
-      <canvas id="scene" width="640" height="480" role="img" aria-label="Drawing canvas"></canvas>
-    </section>
+    <div class="canvas-column">
+      <section class="panel canvas-panel" data-frame="double" data-title="CANVAS" aria-label="Canvas">
+        <canvas id="scene" width="640" height="480" role="img" aria-label="Drawing canvas"></canvas>
+      </section>
+      <p id="agent-statistics" aria-label="Agent token statistics"></p>
+    </div>
     <section class="panel monitor-panel" data-frame="double" data-title="MONITOR" aria-label="Monitor">
       <div class="panel-content">
         <section class="box" data-frame="single" data-title="Stats" aria-label="Stats">
@@ -110,7 +118,7 @@ updateLayerAlgorithm();
 layerCount.addEventListener('input', updateLayerAlgorithm);
 layerCount.addEventListener('change', () => {
   const value = Number(layerCount.value);
-  layerCount.value = String(Number.isFinite(value) ? Math.min(9, Math.max(1, Math.trunc(value))) : 1);
+  layerCount.value = String(Number.isFinite(value) ? Math.min(7, Math.max(1, Math.trunc(value))) : 1);
   updateLayerAlgorithm();
 });
 

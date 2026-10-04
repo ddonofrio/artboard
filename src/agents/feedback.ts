@@ -22,19 +22,17 @@ function uncoveredPixels(host: SceneTools, scene: Scene): number | undefined {
 export function drawingFeedback(host: SceneTools, scene: Scene, changedPixels: number, affectedIds: string[]) {
   const uncovered = uncoveredPixels(host, scene);
   const instructions: string[] = [];
-  if (changedPixels === 0 && affectedIds.length) instructions.push('The edit committed but changed no visible pixels. Do not claim that it painted anything. Inspect the affected objects: they may be hidden by a higher layer, outside the canvas, use the same color as what is behind them, or repeat their existing values.');
-  if (uncovered !== undefined && uncovered > 0) instructions.push(`${uncovered} canvas pixels have no painted object. Fill the missing background before submitting: add a full-canvas polygon behind all existing objects, or extend the intended background planes to cover the gaps. Preserve the requested scene and its foreground objects.`);
+  if (changedPixels === 0 && affectedIds.length) instructions.push('The edit changed no visible pixels. Check the affected objects\' layers, geometry and colors.');
+  if (uncovered !== undefined && uncovered > 0) instructions.push(`Fill the missing background if required by the request; ${uncovered} pixels have no painted object.`);
   return {
     changed_pixels: changedPixels,
     ...(uncovered === undefined ? {} : { unpainted_pixels: uncovered }),
     instructions,
     suggested_actions: instructions.length ? [
-      { tool: 'scene_inspect', arguments: { scene_id: scene.id, ...(affectedIds.length ? { ids: affectedIds } : {}) }, purpose: 'Inspect affected geometry and layers before choosing a correction.' },
-      ...(uncovered ? [{ tool: 'scene_apply', purpose: `Fill uncovered background with polygon points [[0,0],[${scene.width},0],[${scene.width},${scene.height}],[0,${scene.height}]], a palette color, and a layer below all existing objects.` }] : []),
+      ...(changedPixels === 0 && affectedIds.length ? [{ tool: 'scene_inspect', arguments: { scene_id: scene.id, ids: affectedIds }, purpose: 'Check the invisible edit.' }] : []),
+      ...(uncovered ? [{ tool: 'scene_apply', purpose: 'Paint any requested background behind the existing objects.' }] : []),
       ...(changedPixels === 0 && affectedIds.length ? [
-        { tool: 'scene_apply', purpose: 'Use reorder to correct an occluded object layer, respecting which objects should be in front.' },
-        { tool: 'scene_apply', purpose: 'Use update to correct points/bounds or choose a distinct valid palette color. Avoid repeating unchanged values.' },
-        { tool: 'scene_history', purpose: 'Undo an unintended edit instead of adding more objects on top.' },
+        { tool: 'scene_apply', purpose: 'Use reorder to correct occlusion, or update geometry or palette color.' },
       ] : []),
     ] : [],
   };

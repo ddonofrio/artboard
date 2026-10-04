@@ -7,7 +7,7 @@ import { runWorkflow } from '../src/workflows/run';
 import { loadWorkflowConfig } from '../src/adapters/server/config';
 import { runPersistence } from '../src/adapters/server/persistence';
 import { PixelRenderer, SceneStore, SceneTools, type PixelImage } from '../src/core/index';
-import { encodeJPEG, NodeAdapter, OutputStore } from '../src/adapters/node/index.js';
+import { encodeVisionJPEG, NodeAdapter, OutputStore } from '../src/adapters/node/index.js';
 
 if (existsSync('.env.local')) loadEnvFile('.env.local');
 else if (existsSync('.env')) loadEnvFile('.env');
@@ -17,7 +17,8 @@ const layerFlag = args.indexOf('--layers');
 const layers = Number(layerFlag >= 0 ? args.splice(layerFlag, 2)[1] : process.env.AGENT_LAYERS || 1);
 const prompt = args.join(' ') || 'Draw a cave entrance with a rusty gate, a curved path, and vegetation at sunset.';
 class AgentAdapter extends NodeAdapter {
-  async preview(image: PixelImage): Promise<string> { return `data:image/jpeg;base64,${encodeJPEG(image).toString('base64')}`; }
+  constructor(directory: string, private divisor: number) { super(directory); }
+  async preview(image: PixelImage): Promise<string> { return `data:image/jpeg;base64,${encodeVisionJPEG(image, this.divisor).toString('base64')}`; }
 }
 const renderer = new PixelRenderer();
 const outputs = new OutputStore(process.env.AGENT_OUTPUT_DIR || 'outputs', renderer);
@@ -28,7 +29,7 @@ process.once('SIGINT', () => controller.abort());
 try {
   await outputs.record(id, { type: 'start', request: { prompt, layers } });
   const config = await loadWorkflowConfig(process.cwd());
-  const workflow = await runWorkflow({ layers, createTools: () => new SceneTools(new SceneStore(), renderer, new AgentAdapter(directory)), prompt, config, signal: controller.signal, initial_scene: process.env.AGENT_SCENE ? JSON.parse(await readFile(process.env.AGENT_SCENE, 'utf8')) : undefined, async onEvent(item) {
+  const workflow = await runWorkflow({ layers, createTools: () => new SceneTools(new SceneStore(), renderer, new AgentAdapter(directory, config.connection!.vision_image_divisor!)), prompt, config, signal: controller.signal, initial_scene: process.env.AGENT_SCENE ? JSON.parse(await readFile(process.env.AGENT_SCENE, 'utf8')) : undefined, async onEvent(item) {
     await persistence.capture(item);
     if (item.type === 'stage') { console.log(`Stage ${item.index}/${item.total}: ${item.stage.name}`); return; }
     const event = item.event;
@@ -42,7 +43,7 @@ try {
   await writeFile(resolve(directory, 'review.json'), JSON.stringify({ approved: result.approved, stop_reason: result.stop_reason, error: result.error, models: result.models, reviews: result.reviews }, null, 2) + '\n');
   await outputs.record(id, { type: 'saved', output_path: path, approved: result.approved, stop_reason: result.stop_reason });
   if (result.error) console.error(`Latest drawing saved: ${result.error}`);
-  console.log(result.approved ? `Approved final: ${path}` : `Final after ${result.reviews.length} reviews: ${path}`);
+  console.log(result.approved ? `Approved final: ${path}` : result.stop_reason === 'unreviewed' ? `Completed without review: ${path}` : `Final after ${result.reviews.length} reviews: ${path}`);
 } catch (error) {
   try {
     await persistence.flush();

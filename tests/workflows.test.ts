@@ -12,26 +12,32 @@ class InlineAdapter extends NodeAdapter {
 const createTools = () => new SceneTools(new SceneStore(), new PixelRenderer(), new InlineAdapter());
 const profiles = Object.fromEntries(AGENT_ROLES.map(role => [role, { model: `${role}-model` }]));
 
-for (let layers = 1; layers <= 6; layers++) test(`${layers} layers preserve handoffs and review only with the final artist`, async () => {
+for (let layers = 2; layers <= 7; layers++) test(`workflow ${layers} preserves handoffs and reviews only with the final artist`, async () => {
   const fake = mockModel(), events: WorkflowEvent[] = [];
   const result = await runWorkflow({ layers, prompt: 'Scene [reject]', createTools, fetch: fake.fetcher,
     config: { agents: profiles }, onEvent: event => { events.push(event); },
   });
   const workflow = getWorkflow(layers);
   assert.equal(result.result.approved, true);
-  assert.equal(result.stages.length, layers);
+  assert.equal(result.stages.length, layers - 1);
   assert.equal(result.result.reviews.length, 2);
   assert.ok(result.stages.slice(0, -1).every(item => item.result.stop_reason === 'completed' && !item.result.reviews.length));
-  assert.equal(result.result.draft.scene.objects.length, layers + 1);
+  assert.equal(result.result.draft.scene.objects.length, layers);
   const finalRole = workflow.stages.at(-1)!.role;
   const correctionRequests = fake.requests.filter(item => requestContext(item).round === 2 && item.model !== 'reviewer-model');
   assert.ok(correctionRequests.length > 0);
   assert.ok(correctionRequests.every(item => item.model === `${finalRole}-model`));
-  for (let index = 0; index < layers; index++) {
+  for (let index = 0; index < layers - 1; index++) {
     const first = fake.requests.find(item => item.model === `${workflow.stages[index].role}-model`)!;
     const context = requestContext(first);
     assert.equal(context.prompt, 'Scene [reject]');
-    assert.equal(context.workflow!.history.length, index);
+    const system = first.messages.find(message => message.role === 'system')!.content;
+    assert.ok(typeof system === 'string');
+    assert.ok(system.length < 1000, 'Role instructions stay compact');
+    const stageRequests = fake.requests.filter(request => request.model === first.model && !request.tools.some(tool => tool.function.name === 'submit_review'));
+    assert.ok(stageRequests.every(request => request.messages.find(message => message.role === 'system')!.content === system), 'System instructions stay stable through creation and corrections');
+    if (layers === 2) assert.deepEqual(context.workflow, { final: true });
+    else assert.equal(context.workflow!.history.length, index);
     if (index) {
       assert.ok(context.current_scene!.objects.length >= index);
       assert.equal(typeof first.messages.find(item => item.role === 'user')!.content, 'string');
@@ -39,22 +45,39 @@ for (let layers = 1; layers <= 6; layers++) test(`${layers} layers preserve hand
       assert.deepEqual(context.workflow!.previous, context.workflow!.history.at(-1));
     }
   }
-  assert.equal(events.filter(item => item.type === 'stage').length, layers);
+  assert.equal(events.filter(item => item.type === 'stage').length, layers - 1);
+  assert.ok(events.filter(item => item.type === 'stage').every(item => item.total === layers));
 });
 
 test('undefined counts and invalid prompts make no model requests', async () => {
   const fake = mockModel();
-  for (const layers of [0, 7, 8, 9, 1.5, NaN]) {
+  for (const layers of [0, 8, 9, 1.5, NaN]) {
     assert.match(describeLayerAlgorithm(layers), /Not defined/);
-    await assert.rejects(runWorkflow({ layers, prompt: 'Scene', createTools, fetch: fake.fetcher }), /1 to 6/);
+    await assert.rejects(runWorkflow({ layers, prompt: 'Scene', createTools, fetch: fake.fetcher }), /1 to 7/);
   }
-  await assert.rejects(runWorkflow({ layers: 1, prompt: ' ', createTools, fetch: fake.fetcher }), /prompt/);
+  await assert.rejects(runWorkflow({ layers: 2, prompt: ' ', createTools, fetch: fake.fetcher }), /prompt/);
   assert.equal(fake.requests.length, 0);
+});
+
+test('workflow 1 delivers an unreviewed drawing and never invokes a reviewer', async () => {
+  const fake = mockModel(), events: WorkflowEvent[] = [];
+  const workflow = await runWorkflow({ layers: 1, prompt: 'Scene [reject]', createTools, fetch: fake.fetcher,
+    config: { agents: profiles }, onEvent: item => { events.push(item); },
+  });
+  assert.equal(workflow.result.stop_reason, 'unreviewed');
+  assert.equal(workflow.result.approved, false);
+  assert.deepEqual(workflow.result.reviews, []);
+  assert.equal(workflow.stages.length, 1);
+  assert.ok(fake.requests.every(request => request.model === 'artist-model'));
+  assert.ok(!events.some(item => item.type === 'agent' && item.event.type === 'phase' && item.event.role === 'reviewer'));
+  assert.ok(events.some(item => item.type === 'stage' && item.index === 1 && item.total === 1));
+  assert.match(describeLayerAlgorithm(1), /without a reviewer/);
+  assert.match(describeLayerAlgorithm(2), /Artist.*Reviewer/);
 });
 
 test('missing handoff fields are tool errors and recover without advancing the stage', async () => {
   const fake = mockModel(), events: WorkflowEvent[] = [];
-  const result = await runWorkflow({ layers: 2, prompt: 'Scene [invalid-handoff]', createTools, fetch: fake.fetcher,
+  const result = await runWorkflow({ layers: 3, prompt: 'Scene [invalid-handoff]', createTools, fetch: fake.fetcher,
     config: { agents: profiles }, onEvent: event => { events.push(event); },
   });
   assert.equal(result.result.approved, true);
@@ -64,7 +87,7 @@ test('missing handoff fields are tool errors and recover without advancing the s
 
 test('optional stages can hand off unchanged scenes; review limits preserve the latest drawing', async () => {
   const fake = mockModel();
-  const result = await runWorkflow({ layers: 6, prompt: 'Scene [noop] [limit]', createTools, fetch: fake.fetcher,
+  const result = await runWorkflow({ layers: 7, prompt: 'Scene [noop] [limit]', createTools, fetch: fake.fetcher,
     config: { agents: profiles, connection: { max_reviews: 2, vision: false } },
   });
   assert.equal(result.result.stop_reason, 'review_limit');
@@ -77,7 +100,7 @@ test('optional stages can hand off unchanged scenes; review limits preserve the 
 
 test('failure preserves the preceding drawing and stops all later stages', async () => {
   const fake = mockModel();
-  const result = await runWorkflow({ layers: 4, prompt: 'Scene [fail-after-background]', createTools, fetch: fake.fetcher, config: { agents: profiles } });
+  const result = await runWorkflow({ layers: 5, prompt: 'Scene [fail-after-background]', createTools, fetch: fake.fetcher, config: { agents: profiles } });
   assert.equal(result.stages.length, 2);
   assert.equal(result.result.stop_reason, 'incomplete');
   assert.equal(result.result.draft.scene.objects.length, 1);
@@ -86,7 +109,7 @@ test('failure preserves the preceding drawing and stops all later stages', async
 
 test('cancelling after a stage prevents later agents and final delivery', async () => {
   const controller = new AbortController(), fake = mockModel();
-  await assert.rejects(runWorkflow({ layers: 3, prompt: 'Scene', createTools, fetch: fake.fetcher, config: { agents: profiles }, signal: controller.signal,
+  await assert.rejects(runWorkflow({ layers: 4, prompt: 'Scene', createTools, fetch: fake.fetcher, config: { agents: profiles }, signal: controller.signal,
     onEvent: event => { if (event.type === 'agent' && event.event.type === 'final') controller.abort(); },
   }), /abort/i);
   assert.ok(fake.requests.every(item => item.model === 'background-model'));
@@ -94,7 +117,7 @@ test('cancelling after a stage prevents later agents and final delivery', async 
 
 test('a reviewer cannot approve requirements still reported as pending by the final artist', async () => {
   const fake = mockModel(), events: WorkflowEvent[] = [];
-  const result = await runWorkflow({ layers: 2, prompt: 'Scene [pending]', createTools, fetch: fake.fetcher,
+  const result = await runWorkflow({ layers: 3, prompt: 'Scene [pending]', createTools, fetch: fake.fetcher,
     config: { agents: profiles }, onEvent: event => { events.push(event); },
   });
   assert.equal(result.result.approved, true);
@@ -107,7 +130,7 @@ test('a reviewer cannot approve requirements still reported as pending by the fi
 test('model thinking is forwarded from reasoning fields and inline think tags', async () => {
   for (const format of ['reasoning_content', 'reasoning', 'tags']) {
     const fake = mockModel(), thoughts: string[] = [];
-    const result = await runWorkflow({ layers: 1, prompt: 'Scene', createTools, config: { agents: profiles },
+    const result = await runWorkflow({ layers: 2, prompt: 'Scene', createTools, config: { agents: profiles },
       fetch: async (input, init) => {
         const response = await fake.fetcher(input, init);
         const body = await response.json();

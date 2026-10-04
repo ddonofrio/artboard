@@ -1,4 +1,5 @@
 export interface AgentConfig {
+  reasoning_effort?: 'none' | 'low' | 'medium' | 'high';
   base_url: string;
   editor_model: string;
   reviewer_model: string;
@@ -7,10 +8,11 @@ export interface AgentConfig {
   max_output_tokens: number;
   timeout_ms: number;
   vision: boolean;
+  vision_image_divisor: number;
 }
 export const DEFAULT_AGENT_CONFIG: AgentConfig = {
   base_url: 'http://127.0.0.1:1234', editor_model: '', reviewer_model: '',
-  max_reviews: 10, max_output_tokens: 8192, timeout_ms: 300000, vision: true,
+  max_reviews: 10, max_output_tokens: 8192, timeout_ms: 300000, vision: true, vision_image_divisor: 4,
 };
 export function apiBaseURL(value: string): string {
   if (typeof value !== 'string' || !value.trim() || value.length > 4096) throw new Error('base_url must be a nonempty HTTP(S) API URL.');
@@ -22,10 +24,11 @@ export function apiBaseURL(value: string): string {
 export function agentConfig(input: Partial<AgentConfig> = {}): AgentConfig {
   const config = { ...DEFAULT_AGENT_CONFIG, ...input };
   config.base_url = apiBaseURL(config.base_url);
-  for (const [key, minimum, maximum] of [['max_reviews', 1, 10], ['max_output_tokens', 512, 32768], ['timeout_ms', 1000, 600000]] as const) {
+  for (const [key, minimum, maximum] of [['max_reviews', 1, 10], ['max_output_tokens', 512, 32768], ['timeout_ms', 1000, 600000], ['vision_image_divisor', 1, 64]] as const) {
     if (!Number.isInteger(config[key]) || config[key] < minimum || config[key] > maximum) throw new Error(`${key} must be an integer from ${minimum} to ${maximum}.`);
   }
   if (typeof config.vision !== 'boolean') throw new Error('vision must be boolean.');
+  if (config.reasoning_effort !== undefined && !['none', 'low', 'medium', 'high'].includes(config.reasoning_effort)) throw new Error('reasoning_effort must be none, low, medium or high.');
   for (const key of ['editor_model', 'reviewer_model'] as const) {
     if (typeof config[key] !== 'string' || config[key].length > 256) throw new Error(`${key} must be a model ID.`);
     config[key] = config[key].trim();

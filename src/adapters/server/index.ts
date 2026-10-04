@@ -8,13 +8,14 @@ import { getWorkflow } from '../../contracts/workflows.js';
 import { agentConfig, isChatModelID, listModels } from '../../agents/config.js';
 import { AGENT_ROLES } from '../../contracts/workflows.js';
 import type { DrawingEvent, DrawingRequest, ModelsResponse } from '../../contracts/service.js';
-import { NodeAdapter, OutputStore, validateBatchOutput, encodeJPEG, encodePNG } from '../node/index.js';
+import { NodeAdapter, OutputStore, validateBatchOutput, encodeVisionJPEG, encodePNG } from '../node/index.js';
 import { ensureAgentConfig, loadWorkflowConfig } from './config.js';
 import { runPersistence } from './persistence.js';
 import { paintPreviews } from './paint-preview.js';
 
 class InlineAdapter extends NodeAdapter {
-  async preview(image: PixelImage): Promise<string> { return `data:image/jpeg;base64,${encodeJPEG(image).toString('base64')}`; }
+  constructor(directory: string, private divisor: number) { super(directory); }
+  async preview(image: PixelImage): Promise<string> { return `data:image/jpeg;base64,${encodeVisionJPEG(image, this.divisor).toString('base64')}`; }
 }
 export interface DrawingServiceOptions { root: string; environment?: NodeJS.ProcessEnv; fetch?: typeof fetch }
 export async function createDrawingService(options: DrawingServiceOptions) {
@@ -60,6 +61,8 @@ export async function createDrawingService(options: DrawingServiceOptions) {
       try { input = JSON.parse(body); } catch { jsonError(400, 'Invalid drawing request JSON.'); return; }
       if (!input || typeof input.prompt !== 'string' || !input.prompt.trim() || input.prompt.length > 4000 || (input.scene_id !== undefined && typeof input.scene_id !== 'string')) { jsonError(400, 'Use a prompt of 1 to 4000 characters and an optional scene_id.'); return; }
       if (input.model !== undefined && (typeof input.model !== 'string' || !input.model.trim() || input.model.length > 256)) { jsonError(400, 'Use a model ID of 1 to 256 characters.'); return; }
+      if (input.reasoning_effort !== undefined && !['none', 'low', 'medium', 'high'].includes(input.reasoning_effort)) { jsonError(400, 'reasoning_effort must be none, low, medium or high.'); return; }
+      if (input.vision_image_divisor !== undefined && (!Number.isInteger(input.vision_image_divisor) || input.vision_image_divisor < 1 || input.vision_image_divisor > 64)) { jsonError(400, 'Image divisor must be an integer from 1 to 64.'); return; }
       try { getWorkflow(input.layers); } catch (error) { jsonError(400, (error as Error).message); return; }
       try { if (input.batch !== undefined) validateBatchOutput(input.batch); } catch (error) { jsonError(400, (error as Error).message); return; }
       const base = input.scene_id === undefined ? undefined : scenes.get(input.scene_id);
@@ -67,6 +70,8 @@ export async function createDrawingService(options: DrawingServiceOptions) {
       const id = randomUUID(); runId = id;
       await outputs.record(id, { type: 'start', request: input });
       const config = await loadWorkflowConfig(options.root, environment);
+      if (input.reasoning_effort !== undefined) config.connection = { ...config.connection, reasoning_effort: input.reasoning_effort };
+      if (input.vision_image_divisor !== undefined) config.connection = { ...config.connection, vision_image_divisor: input.vision_image_divisor };
       if (input.model !== undefined) {
         const model = input.model.trim();
         config.connection = { ...config.connection, editor_model: model, reviewer_model: model };
@@ -82,17 +87,29 @@ export async function createDrawingService(options: DrawingServiceOptions) {
       let operations: Operation[] | undefined;
       let responseNumber = 0;
       const onEvent = async (event: WorkflowEvent) => {
+        if (event.type === 'agent') {
+          const item = event.event;
+          if (item.type === 'model' && item.state === 'request') {
+            responseNumber++;
+            emit({ type: 'statistics', id: `${id}:${responseNumber}`, model: item.model, role: item.role, state: 'request', usage: {}, timings: {} });
+          }
+          if (item.type === 'statistics') emit({ ...item, id: `${id}:${responseNumber}`, state: 'response' });
+          const prefix = `${id}:${responseNumber}:`;
+          if (item.type === 'state') emit({ type: 'state', state: item.state, tool: item.tool });
+          if (item.type === 'tool_input') { emit({ type: 'tool_input', id: prefix + item.call_id, name: item.name, input: item.input }); return; }
+          if (item.type === 'thinking') {
+            emit({ type: 'thinking', id: prefix + item.id, final: item.final, text: item.text, tokens: item.tokens, tokens_estimated: item.tokens_estimated });
+            if (!item.final) return;
+          }
+        }
         await persistence!.capture(event);
         if (event.type === 'stage') { emit({ type: 'stage', name: event.stage.name, index: event.index, total: event.total }); return; }
         const item = event.event;
-        if (item.type === 'state') emit({ type: 'state', state: item.state, tool: item.tool });
         if (item.type === 'phase') emit({ type: 'phase', role: item.role, round: item.round });
-        if (item.type === 'response') responseNumber++;
         if (item.type === 'tool') {
-          operations = item.ok && item.name === 'scene_apply' ? item.input.operations as Operation[] : undefined;
-          emit({ type: 'tool', name: item.name, input: item.input, ok: item.ok, message: item.message });
+          operations = item.ok && item.name === 'scene_apply' ? (item.applied_input ?? item.input).operations as Operation[] : undefined;
+          emit({ type: 'tool', id: item.call_id ? `${id}:${responseNumber}:${item.call_id}` : undefined, name: item.name, input: item.input, ok: item.ok, message: item.message });
         }
-        if (item.type === 'thinking') emit({ type: 'thinking', text: item.text });
         if (item.type === 'transport_error') emit({ type: 'execution_error', message: item.message });
         if (item.type === 'response' && item.error) emit({ type: 'execution_error', message: item.error });
         if (item.type === 'preview') {
@@ -109,7 +126,7 @@ export async function createDrawingService(options: DrawingServiceOptions) {
       const started = Date.now();
       const directory = outputs.runFolder(id);
       const workflow = await runWorkflow({ prompt: input.prompt, layers: input.layers, initial_scene: base, config, fetch: options.fetch, signal: controller.signal, onEvent,
-        createTools: () => new SceneTools(new SceneStore(), renderer, new InlineAdapter(directory)),
+        createTools: () => new SceneTools(new SceneStore(), renderer, new InlineAdapter(directory, agentConfig(config.connection).vision_image_divisor)),
       });
       controller.signal.throwIfAborted();
       const result = workflow.result;

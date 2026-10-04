@@ -51,7 +51,7 @@ Artboard is designed as a reusable component. Adventure is its original home, bu
 
 **Under development.** The drawing application is being explored and refined, and its visual style is still evolving.
 
-The repository contains the drawing core, separate drawing agents, six creation workflows, Node/HTTP adapters, and a DOS-style browser interface with prompt, canvas, and monitor columns. The UI executes workflows through a local service with live previews, batch input, editing and cancellation. Artboard is the maintained drawing component of Adventure. Story generation, narration, player choices, and game sessions stay in Adventure.
+The repository contains the drawing core, separate drawing agents, seven workflows, Node/HTTP adapters, and a DOS-style browser interface with prompt, canvas, and monitor columns. Workflow 1 delivers without a reviewer; workflows 2-7 include independent review. The UI executes workflows through a local service with streamed model progress, live previews, batch input, editing and cancellation. Artboard is the maintained drawing component of Adventure. Story generation, narration, player choices, and game sessions stay in Adventure.
 
 ## Start
 

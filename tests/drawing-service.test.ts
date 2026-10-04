@@ -4,16 +4,18 @@ import { createServer } from 'node:http';
 import { copyFile, mkdir, mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { PNG } from 'pngjs';
+import jpeg from 'jpeg-js';
 import { createDrawingService } from '../src/adapters/server/index';
 import type { DrawingEvent } from '../src/contracts/service';
 import { mockModel } from './fixtures/model';
+import { deferred, gatedCompletion } from './fixtures/stream';
 
-async function startService(options: { discovery?: typeof fetch; environment?: NodeJS.ProcessEnv } = {}) {
+async function startService(options: { discovery?: typeof fetch; inference?: typeof fetch; environment?: NodeJS.ProcessEnv } = {}) {
   await mkdir(resolve('.tmp'), { recursive: true });
   const root = await mkdtemp(resolve('.tmp', 'service-test-'));
   await copyFile(resolve('agents.example.json'), resolve(root, 'agents.example.json'));
   const model = mockModel();
-  const fetcher: typeof fetch = (input, init) => options.discovery && String(input).endsWith('/models') ? options.discovery(input, init) : model.fetcher(input, init);
+  const fetcher: typeof fetch = (input, init) => options.discovery && String(input).endsWith('/models') ? options.discovery(input, init) : (options.inference ?? model.fetcher)(input, init);
   const middleware = await createDrawingService({ root, fetch: fetcher, environment: { AGENT_EDITOR_MODEL: 'test-model', AGENT_API_KEY: 'server-only-key', AGENT_MAX_REVIEWS: '2', ...options.environment } });
   const server = createServer((request, response) => { void middleware(request, response, () => { response.writeHead(404); response.end(); }); });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -25,6 +27,109 @@ async function startService(options: { discovery?: typeof fetch; environment?: N
   return { root, url, close, draw, model };
 }
 const events = (text: string): DrawingEvent[] => text.trim().split('\n').map(line => JSON.parse(line));
+
+test('HTTP reasoning and tool arguments arrive while the model response is still open', { timeout: 15000 }, async () => {
+  const fake = mockModel(), prefillGate = deferred(), argumentsGate = deferred(), finishGate = deferred();
+  const service = await startService({ inference: async (input, init) => {
+    const response = await fake.fetcher(input, init);
+    return fake.requests.length === 1 ? gatedCompletion(await response.json(), argumentsGate.promise, finishGate.promise, prefillGate.promise) : response;
+  } });
+  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+  const deadline = setTimeout(() => { prefillGate.resolve(); argumentsGate.resolve(); finishGate.resolve(); }, 10000);
+  try {
+    const response = await service.draw({ prompt: 'Scene', layers: 2 });
+    reader = response.body!.getReader();
+    const decoder = new TextDecoder(), items: DrawingEvent[] = [];
+    let buffer = '';
+    const until = async (predicate: (item: DrawingEvent) => boolean) => {
+      while (!items.some(predicate)) {
+        const chunk = await reader!.read(); assert.equal(chunk.done, false);
+        buffer += decoder.decode(chunk.value, { stream: true });
+        let end: number;
+        while ((end = buffer.indexOf('\n')) >= 0) { items.push(JSON.parse(buffer.slice(0, end))); buffer = buffer.slice(end + 1); }
+      }
+    };
+    await until(item => item.type === 'state' && item.state === 'processing_prompt');
+    assert.ok(!items.some(item => item.type === 'state' && item.state === 'thinking'), 'Prefill is not labeled as thinking');
+    prefillGate.resolve();
+    await until(item => item.type === 'tool_input');
+    assert.equal(fake.requests[0].stream, true);
+    assert.deepEqual(fake.requests[0].stream_options, { include_usage: true });
+    assert.ok(items.some(item => item.type === 'thinking' && item.text === 'Plan the scene: draw the whole block.' && item.tokens_estimated));
+    assert.ok(items.some(item => item.type === 'state' && item.state === 'writing_tool_args'));
+    assert.ok(!items.some(item => item.type === 'tool'));
+    argumentsGate.resolve();
+    await until(item => item.type === 'tool_input' && item.input.endsWith('}'));
+    assert.ok(!items.some(item => item.type === 'final'));
+    assert.equal(fake.requests.length, 1, 'No next request until the current stream closes');
+    const partial = items.find(item => item.type === 'tool_input');
+    finishGate.resolve();
+    await until(item => item.type === 'final');
+    const executed = items.find(item => item.type === 'tool');
+    assert.equal(partial?.id, executed?.id, 'The log updates one tool entry through generation and execution');
+    assert.ok(items.some(item => item.type === 'thinking' && item.final && item.tokens === 17 && !item.tokens_estimated));
+    assert.ok(items.some(item => item.type === 'final' && item.approved));
+  } finally { clearTimeout(deadline); prefillGate.resolve(); argumentsGate.resolve(); finishGate.resolve(); await reader?.cancel(); await service.close(); }
+});
+
+test('workflow 1 saves and returns a complete drawing without reviewer requests or approval', async () => {
+  const service = await startService();
+  try {
+    const items = events(await (await service.draw({ prompt: 'Scene [reject]', layers: 1 })).text());
+    const final = items.at(-1);
+    assert.ok(final?.type === 'final' && final.stop_reason === 'unreviewed' && !final.approved);
+    assert.ok(!items.some(item => item.type === 'review'));
+    assert.ok(service.model.requests.every(request => !request.tools.some(tool => tool.function.name === 'submit_review')));
+    if (final?.type === 'final') assert.ok((await readFile(resolve(service.root, final.output_path!))).length > 0);
+  } finally { await service.close(); }
+});
+
+test('reasoning selection applies to every stage and reviewer for one request without changing private defaults', async () => {
+  const service = await startService();
+  try {
+    const path = resolve(service.root, 'agents.local.json');
+    const original = JSON.stringify({ connection: { reasoning_effort: 'high' }, agents: {} });
+    await writeFile(path, original);
+    for (const effort of ['none', 'low', 'medium', 'high']) {
+      const start = service.model.requests.length;
+      const items = events(await (await service.draw({ prompt: 'Scene', layers: 3, reasoning_effort: effort })).text());
+      assert.ok(items.at(-1)?.type === 'final');
+      assert.ok(service.model.requests.slice(start).every(request => request.reasoning_effort === effort));
+    }
+    const start = service.model.requests.length;
+    await (await service.draw({ prompt: 'Default', layers: 2 })).text();
+    assert.ok(service.model.requests.slice(start).every(request => request.reasoning_effort === 'high'));
+    assert.equal(await readFile(path, 'utf8'), original);
+    for (const invalid of ['off', 'auto', '', null, 0]) assert.equal((await service.draw({ prompt: 'Scene', layers: 2, reasoning_effort: invalid })).status, 400);
+  } finally { await service.close(); }
+});
+
+test('vision JPGs reduce both dimensions per request while canvas previews and saved outputs stay full size', async () => {
+  const service = await startService();
+  try {
+    for (const divisor of [4, 2, 1]) {
+      const start = service.model.requests.length;
+      const items = events(await (await service.draw({ prompt: 'Scene', layers: 2, ...(divisor === 4 ? {} : { vision_image_divisor: divisor }) })).text());
+      const images = service.model.requests.slice(start).flatMap(request => request.messages.flatMap(message => Array.isArray(message.content) ? message.content.filter(part => part.type === 'image_url') : []));
+      assert.ok(images.length > 0);
+      for (const image of images) {
+        const decoded = jpeg.decode(Buffer.from(image.image_url!.url.split(',')[1], 'base64'));
+        assert.equal(decoded.width, 640 / divisor); assert.equal(decoded.height, 480 / divisor);
+      }
+      const preview = items.find(item => item.type === 'preview');
+      assert.ok(preview?.type === 'preview');
+      if (preview?.type === 'preview') assert.equal(PNG.sync.read(Buffer.from(preview.image.split(',')[1], 'base64')).width, 640);
+      const final = items.at(-1);
+      if (final?.type === 'final') {
+        const saved = jpeg.decode(await readFile(resolve(service.root, final.output_path!)));
+        assert.equal(saved.width, 640); assert.equal(saved.height, 480);
+      }
+    }
+    const start = service.model.requests.length;
+    for (const invalid of [0, -1, 1.5, 65, '4', null]) assert.equal((await service.draw({ prompt: 'Scene', layers: 2, vision_image_divisor: invalid })).status, 400);
+    assert.equal(service.model.requests.length, start);
+  } finally { await service.close(); }
+});
 test('model listing uses the configured v1 endpoint and private key without starting inference or exposing settings', async () => {
   const calls: { url: string; authorization: string | null }[] = [];
   const service = await startService({ environment: { AGENT_BASE_URL: 'http://models.test:9123/v1/', AGENT_EDITOR_MODEL: 'second-model' }, discovery: async (input, init) => {
@@ -59,12 +164,12 @@ test('a selected model overrides every artist and reviewer only for its request 
     const path = resolve(service.root, 'agents.local.json');
     const original = JSON.stringify({ connection: { reviewer_model: 'default-reviewer' }, agents: { background: { model: 'background-local', instructions: 'Keep request-specific selection separate.' }, main_content: { model: 'subject-local' }, reviewer: { model: 'reviewer-local' } } });
     await writeFile(path, original);
-    const selected = events(await (await service.draw({ prompt: 'Selected run', layers: 2, model: 'second-model' })).text());
+    const selected = events(await (await service.draw({ prompt: 'Selected run', layers: 3, model: 'second-model' })).text());
     assert.ok(selected.at(-1)?.type === 'final');
     assert.ok(service.model.requests.length > 0 && service.model.requests.every(request => request.model === 'second-model'));
     assert.ok(service.model.requests.some(request => request.messages.some(message => typeof message.content === 'string' && message.content.includes('Keep request-specific selection separate.'))));
     const count = service.model.requests.length;
-    await (await service.draw({ prompt: 'Default run', layers: 2 })).text();
+    await (await service.draw({ prompt: 'Default run', layers: 3 })).text();
     assert.deepEqual(new Set(service.model.requests.slice(count).map(request => request.model)), new Set(['background-local', 'subject-local', 'reviewer-local']));
     assert.equal(await readFile(path, 'utf8'), original);
   } finally { await service.close(); }
@@ -72,7 +177,7 @@ test('a selected model overrides every artist and reviewer only for its request 
 test('separate tool calls from one model response share a queue; the next response uses a new queue', async () => {
   const service = await startService();
   try {
-    const items = events(await (await service.draw({ prompt: 'Scene [paired-calls]', layers: 1 })).text());
+    const items = events(await (await service.draw({ prompt: 'Scene [paired-calls]', layers: 2 })).text());
     const indices = items.flatMap((item, index) => item.type === 'tool' && item.name === 'scene_apply' ? [index] : []);
     assert.equal(indices.length, 2);
     const first = items[indices[0] + 1], second = items[indices[1] + 1];
@@ -88,7 +193,7 @@ test('separate tool calls from one model response share a queue; the next respon
 test('service sends nested figures separately in one response queue with radial circle geometry', async () => {
   const service = await startService();
   try {
-    const items = events(await (await service.draw({ prompt: 'Scene [nested]', layers: 1 })).text());
+    const items = events(await (await service.draw({ prompt: 'Scene [nested]', layers: 2 })).text());
     const start = items.findIndex(item => item.type === 'tool' && item.name === 'scene_apply');
     const frames = items.slice(start + 1, start + 4);
     assert.ok(frames.every(item => item.type === 'preview'));
@@ -109,7 +214,7 @@ test('service sends nested figures separately in one response queue with radial 
 test('service streams stages, tools, images and reviews; saves and edits the returned scene', async () => {
   const service = await startService();
   try {
-    const first = await service.draw({ prompt: 'Scene [reject]', layers: 3 });
+    const first = await service.draw({ prompt: 'Scene [reject] [thinking]', layers: 4 });
     assert.equal(first.status, 200);
     const text = await first.text(), items = events(text);
     assert.ok(!text.includes('server-only-key'));
@@ -128,11 +233,11 @@ test('service streams stages, tools, images and reviews; saves and edits the ret
     if (final.type !== 'final') return;
     assert.equal(final.approved, true);
     const saved = JSON.parse(await readFile(resolve(service.root, 'outputs', 'workflow', final.scene_id, 'final.json'), 'utf8'));
-    assert.match(final.output_path!, /^outputs\/\d{8}\/Scene \[reject\]\.jpg$/);
+    assert.match(final.output_path!, /^outputs\/\d{8}\/Scene \[reject\] \[thinking\]\.jpg$/);
     assert.ok((await readFile(resolve(service.root, final.output_path!))).subarray(0, 2).equals(Buffer.from([255, 216])));
     const previews = items.filter(item => item.type === 'preview');
     assert.ok(previews.every(item => item.type === 'preview' && item.image.startsWith('data:image/png;')));
-    const edited = events(await (await service.draw({ prompt: 'Edit this scene', layers: 1, scene_id: final.scene_id })).text());
+    const edited = events(await (await service.draw({ prompt: 'Edit this scene', layers: 2, scene_id: final.scene_id })).text());
     const result = edited.at(-1)!;
     assert.ok(result.type === 'final' && result.approved && result.scene_id !== final.scene_id);
     if (result.type === 'final') {
@@ -144,12 +249,23 @@ test('service streams stages, tools, images and reviews; saves and edits the ret
     for (const type of ['start', 'prompt', 'response', 'tool', 'preview', 'draft', 'review', 'final', 'saved']) assert.ok(journal.includes(`"type":"${type}"`), type);
   } finally { await service.close(); }
 });
+test('service forwards reasoning token usage separately from tool output tokens', async () => {
+  const service = await startService();
+  try {
+    const response = await service.draw({ prompt: 'Scene [thinking]', layers: 2 });
+    const thoughts = events(await response.text()).filter(item => item.type === 'thinking');
+    assert.ok(thoughts.length > 0);
+    assert.ok(thoughts.every(item => item.tokens === 512 && item.tokens_estimated === false));
+    assert.ok(thoughts.every(item => item.text.includes('Inspect the requested scene')));
+  } finally { await service.close(); }
+});
+
 test('service rejects malformed requests, undefined flows, missing bases and cross-origin calls before inference', async () => {
   const service = await startService();
   try {
-    for (const value of [null, {}, { prompt: ' ', layers: 1 }, { prompt: 'Scene', layers: 7 }, { prompt: 'x'.repeat(4001), layers: 1 }, { prompt: 'Scene', layers: 1, batch: { id: '../escape', index: 1 } }]) assert.equal((await service.draw(value)).status, 400);
-    for (const model of ['', ' ', 42, null, 'x'.repeat(257)]) assert.equal((await service.draw({ prompt: 'Scene', layers: 1, model })).status, 400);
-    assert.equal((await service.draw({ prompt: 'Scene', layers: 1, scene_id: 'unknown' })).status, 404);
+    for (const value of [null, {}, { prompt: ' ', layers: 2 }, { prompt: 'Scene', layers: 8 }, { prompt: 'x'.repeat(4001), layers: 2 }, { prompt: 'Scene', layers: 2, batch: { id: '../escape', index: 1 } }]) assert.equal((await service.draw(value)).status, 400);
+    for (const model of ['', ' ', 42, null, 'x'.repeat(257)]) assert.equal((await service.draw({ prompt: 'Scene', layers: 2, model })).status, 400);
+    assert.equal((await service.draw({ prompt: 'Scene', layers: 2, scene_id: 'unknown' })).status, 404);
     assert.equal((await fetch(`${service.url}/api/runs`)).status, 405);
     assert.equal((await fetch(`${service.url}/api/runs`, { method: 'POST', headers: { Origin: 'https://other.test' }, body: '{}' })).status, 403);
     assert.equal(service.model.requests.length, 0);
@@ -158,12 +274,12 @@ test('service rejects malformed requests, undefined flows, missing bases and cro
 test('model failures remain visible in the stream and incomplete drawings retain their partial result', async () => {
   const service = await startService();
   try {
-    const items = events(await (await service.draw({ prompt: 'Scene [fail-after-background]', layers: 3 })).text());
+    const items = events(await (await service.draw({ prompt: 'Scene [fail-after-background]', layers: 4 })).text());
     assert.ok(items.some(item => item.type === 'execution_error' && /Simulated model failure/.test(item.message)));
     const final = items.at(-1)!;
     assert.ok(final.type === 'final' && final.stop_reason === 'incomplete' && !final.approved);
     if (final.type === 'final') assert.ok((await readdir(resolve(service.root, 'outputs', 'workflow', final.scene_id))).includes('background-draft-1.json'));
-    const failure = events(await (await service.draw({ prompt: '[fail]', layers: 1 })).text());
+    const failure = events(await (await service.draw({ prompt: '[fail]', layers: 2 })).text());
     assert.equal(failure.at(-1)!.type, 'error');
     assert.match(await readFile(resolve(service.root, 'outputs', 'logs', 'agent.jsonl'), 'utf8'), /"type":"error"/);
   } finally { await service.close(); }
@@ -174,7 +290,7 @@ test('service batch deliveries use the shared batch UUID and numbered JPG paths'
   const id = '01234567-89ab-4cde-8fab-0123456789ab';
   try {
     for (const index of [1, 2]) {
-      const items = events(await (await service.draw({ prompt: `Scene ${index}`, layers: 1, batch: { id, index } })).text());
+      const items = events(await (await service.draw({ prompt: `Scene ${index}`, layers: 2, batch: { id, index } })).text());
       const final = items.at(-1)!;
       assert.ok(final.type === 'final' && final.approved);
       if (final.type === 'final') assert.equal(final.output_path, `outputs/batch/${id}/${String(index).padStart(3, '0')}.jpg`);

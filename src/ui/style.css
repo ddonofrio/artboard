@@ -79,6 +79,7 @@ textarea:focus, input:focus, select:focus { outline: 0; }
 .layer-algorithm { overflow-wrap: anywhere; }
 #activity-log, #workflow-log, #agent-state { min-width: 0; overflow-wrap: anywhere; color: inherit; }
 .log-clamped { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; max-height: 32px; white-space: pre-wrap; }
+.log-clamped[data-kind="thinking"] { display: block; }
 .layer-row input { width: 4ch; border-bottom: 1px solid #a9afb9; text-align: center; appearance: textfield; }
 .layer-row input::-webkit-inner-spin-button, .layer-row input::-webkit-outer-spin-button { appearance: none; margin: 0; }
 .checkbox-row input { position: absolute; width: 24px; height: 16px; margin: 0; opacity: 0; }
@@ -101,7 +102,9 @@ details[open] > summary::before { content: '[-] '; }
 .field-box select { appearance: none; padding-right: 16px; }
 .field-box:has(select)::after { content: '▼'; position: absolute; right: 16px; top: 16px; pointer-events: none; color: #e7bb71; }
 .canvas-panel { align-self: start; padding: 16px 8px; }
+.canvas-column { min-width: 0; align-self: start; }
 canvas { display: block; width: 100%; height: auto; aspect-ratio: 4 / 3; image-rendering: pixelated; }
+#agent-statistics { margin: 8px 0 0; white-space: nowrap; overflow-x: auto; font: inherit; }
 .metrics { display: grid; gap: 16px; }
 .metrics > div { display: flex; justify-content: space-between; gap: 8px; }
 .metrics dd { color: #e7bb71; }

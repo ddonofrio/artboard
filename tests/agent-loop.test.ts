@@ -27,8 +27,7 @@ function simulatedServer(options: MockOptions = {}) {
     if (url.endsWith('/models')) return Response.json({ data: [{ id: 'text-embedding-test' }, { id: 'local-vision' }] });
     assert.ok(url.endsWith('/chat/completions'));
     const request = JSON.parse(String(init?.body)) as ChatRequest; requests.push(request);
-    const system = request.messages.find(message => message.role === 'system')!.content as string;
-    const role = system.includes('scene EDITOR') ? 'editor' : 'reviewer';
+    const role = request.tools.some(tool => tool.function.name === 'submit_review') ? 'reviewer' : 'editor';
     const user = request.messages.filter(message => message.role === 'user').at(-1)!;
     const content = typeof user.content === 'string' ? user.content : user.content!.find(part => part.type === 'text')!.text!;
     const context = JSON.parse(content) as { round: number; draft?: { scene: Scene } | null; current_scene?: Scene };
@@ -49,8 +48,8 @@ function simulatedServer(options: MockOptions = {}) {
     catch { /* SDK tool errors use a plain-text tool message. */ }
     const previousRevision = priorResult?.result?.revision ?? context.current_scene?.revision ?? context.draft?.scene.revision ?? 0;
     if (role === 'editor' && options.neverFinish && step > 1) { name = 'scene_catalog'; args = { category: 'materials', id: 'stone' }; }
-    else if (role === 'editor' && step === 0 && !context.draft) { name = 'scene_create'; args = { scene_id: 'artboard', seed: 42 }; }
-    else if (role === 'editor' && step === 1 && !context.draft) {
+    else if (role === 'editor' && step === 0 && context.round === 1) { name = 'scene_inspect'; args = { scene_id: 'artboard' }; }
+    else if (role === 'editor' && step === 1 && context.round === 1) {
       name = 'scene_apply'; args = { scene_id: 'artboard', operations: [
         { op: 'add', object: { id: 'background', kind: 'polygon', points: [[0,0],[640,0],[640,480],[0,480]], layer: -100, color: 12 } },
         { op: 'add', object: { id: 'entrance_gate', kind: 'procedural', generator: 'gate', bounds: [266,168,108,191], layer: 10, params: { shape: 'arched', bar_count: 6 } } },
@@ -97,8 +96,10 @@ test('AI SDK feeds rejected reviews back to the editor without unsolicited image
   assert.equal(typeof editContent, 'string');
   const editContext = JSON.parse(editContent as string);
   assert.deepEqual(editContext.review, result.reviews[0]);
-  assert.equal(editContext.task, 'Edit the drawing to address the independent review.');
-  assert.equal(editContext.max_reviews, 3);
+  assert.equal(editContext.task, 'Here is the drawing request from the user:');
+  assert.equal(editContext.prompt, 'A cave with a gate');
+  assert.equal(editContext.max_reviews, undefined);
+  assert.equal(editContext.draft, undefined, 'Current scene is supplied once, without a duplicate draft');
   assert.ok(fake.requests.filter(request => request.model === 'editor-vl').every(request => !JSON.stringify(request.messages).includes('data:image/')));
   for (const [index, request] of reviewerCalls.entries()) {
     const images = request.messages.flatMap(message => Array.isArray(message.content) ? message.content.filter(part => part.type === 'image_url') : []);
@@ -121,14 +122,14 @@ test('AI SDK feeds rejected reviews back to the editor without unsolicited image
   assert.ok(modelEvents.every(e => e.model === (e.role === 'editor' ? 'editor-vl' : 'reviewer-vl')));
   assert.ok(modelEvents.filter(e => e.state === 'response').every(e => e.output_tokens === 40));
   const previews = events.filter(e => e.type === 'preview');
-  assert.deepEqual(previews.filter(e => ['scene_create', 'scene_apply'].includes(e.source)).map(e => [e.source,e.scene.revision]), [['scene_create',0],['scene_apply',1],['scene_apply',2],['scene_apply',3]]);
+  assert.deepEqual(previews.filter(e => e.source === 'scene_apply').map(e => [e.source,e.scene.revision]), [['scene_apply',1],['scene_apply',2],['scene_apply',3]]);
   assert.equal(previews[0].scene.objects.length, 0);
   assert.equal(previews[0].changed_pixels, 0);
   assert.ok(previews.filter(e => e.source === 'scene_apply').every(e => e.changed_pixels > 0));
-  assert.deepEqual(fake.requests[0].tools.map(tool => tool.function.name), ['scene_create']);
-  assert.deepEqual(fake.requests[1].tools.map(tool => tool.function.name), ['scene_apply']);
+  assert.ok(!fake.requests[0].tools.some(tool => tool.function.name === 'scene_create'));
+  assert.deepEqual(fake.requests[0].tools, fake.requests[1].tools);
   const toolEvents = events.filter(e => e.type === 'tool');
-  assert.deepEqual(previews.map(e => [e.role,e.source]), toolEvents.map(e => [e.role,e.name]));
+  assert.deepEqual(previews.filter(e => e.source !== 'initial').map(e => [e.role,e.source]), toolEvents.map(e => [e.role,e.name]));
   assert.ok(events.indexOf(previews[0]) < events.findIndex(e => e.type === 'draft'));
   assert.ok(previews.every(e => e.scene.revision === e.preview.revision && e.preview.image_ref.startsWith('data:image/jpeg;base64,')));
   const prompts = events.filter(e => e.type === 'prompt');
@@ -139,7 +140,7 @@ test('AI SDK feeds rejected reviews back to the editor without unsolicited image
   const edit = events.find(e => e.type === 'tool' && e.name === 'scene_apply');
   assert.ok(edit?.type === 'tool' && Array.isArray(edit.input.operations) && edit.output.ok);
 });
-test('prebuilt recipe calls are rejected visibly and the SDK retries with an empty canvas', async () => {
+test('canvas creation is unavailable to models and stale creation calls recover with the prepared canvas', async () => {
   const tools = host(), fake = simulatedServer({ approveAll: true }), events: AgentEvent[] = [];
   let first = true;
   const result = await runAgentLoop({ tools, prompt: 'An original forest', config: { editor_model: 'vl' }, onEvent: event => events.push(event),
@@ -155,8 +156,8 @@ test('prebuilt recipe calls are rejected visibly and the SDK retries with an emp
   });
   assert.equal(result.approved, true);
   const failed = events.find(event => event.type === 'tool' && event.name === 'scene_create' && !event.ok);
-  assert.ok(failed?.type === 'tool' && !failed.output.ok && failed.output.error.code === 'AGENT_VALIDATION');
-  assert.match(failed.message!, /empty scenes only/);
+  assert.ok(failed?.type === 'tool' && !failed.output.ok && failed.output.error.code === 'SDK_TOOL_ERROR');
+  assert.match(failed.message!, /canvas already exists/);
   assert.equal(events.filter(event => event.type === 'preview')[0].scene.objects.length, 0);
   assert.deepEqual(result.draft.scene.objects.map(object => object.id), ['background', 'entrance_gate']);
 });
@@ -243,7 +244,7 @@ test('editor receives fresh snapshots and the reviewer retains its prior convers
     const submissions = request.messages.flatMap(message => message.tool_calls ?? []).filter(call => call.function.name === 'submit_review');
     assert.deepEqual(submissions.map(call => JSON.parse(call.function.arguments)), result.reviews.slice(0, index));
     for (const call of submissions) assert.ok(request.messages.some(message => message.role === 'tool' && message.tool_call_id === call.id));
-    if (index > 0) assert.match(context.task, /verify each correction/);
+    assert.equal(context.prompt, 'A cave with a gate');
   }
   assert.deepEqual(revisions, [0,1,1,2,2,3]);
 });
@@ -255,10 +256,10 @@ test('an unchanged or invisible correction cannot bypass the rejected review; ta
     const request = JSON.parse(String(init?.body)) as ChatRequest;
     const user = request.messages.filter(message => message.role === 'user').at(-1)!.content;
     const context = JSON.parse(typeof user === 'string' ? user : user!.find(part => part.type === 'text')!.text!);
-    if (typeof request.messages[0].content === 'string' && request.messages[0].content.includes('scene EDITOR') && context.round === 2) {
+    if (!request.tools.some(tool => tool.function.name === 'submit_review') && context.round === 2) {
       correctionRequests++;
       assert.deepEqual(context.review.issues, [{ object_id: 'entrance_gate', instruction: 'Reduce the number of bars to make the entrance clearer.' }]);
-      assert.match(request.messages[0].content as string, /Correction checklist.*entrance_gate/);
+      assert.equal(request.messages[0].content, EDITOR_INSTRUCTIONS, 'Correction data does not duplicate the system instructions');
       if (correctionRequests <= 3) {
         const name = correctionRequests === 2 ? 'scene_apply' : 'finish_draft';
         const args = name === 'finish_draft' ? { revision: context.current_scene.revision } : { scene_id: 'artboard', operations: [{ op: 'update', id: 'entrance_gate', changes: { params: { bar_count: 6 } } }] };
@@ -314,10 +315,12 @@ test('model transport errors after drawing deliver the current canvas without cl
   }
 });
 
-test('ending without ever creating a canvas produces no final image', async () => {
+test('ending before any drawing reports an incomplete prepared canvas', async () => {
   const events: AgentEvent[] = [];
-  await assert.rejects(() => runAgentLoop({ tools: host(), prompt: 'Cave', config: { editor_model: 'vl' }, onEvent: event => events.push(event), fetch: async () => Response.json({ id: 'empty', object: 'chat.completion', created: 1, model: 'vl', choices: [{ index: 0, finish_reason: 'length', message: { role: 'assistant', content: '' } }] }) }));
-  assert.equal(events.filter(event => event.type === 'final').length, 0);
+  const result = await runAgentLoop({ tools: host(), prompt: 'Cave', config: { editor_model: 'vl' }, onEvent: event => events.push(event), fetch: async () => Response.json({ id: 'empty', object: 'chat.completion', created: 1, model: 'vl', choices: [{ index: 0, finish_reason: 'length', message: { role: 'assistant', content: '' } }] }) });
+  assert.equal(result.stop_reason, 'incomplete');
+  assert.equal(result.draft.scene.width, 640);
+  assert.equal(events.filter(event => event.type === 'final').length, 1);
 });
 
 test('XML embedded in function arguments is rejected with protocol guidance, then native calls recover', async () => {
@@ -540,7 +543,7 @@ test('misplaced object colors return actionable feedback and recover before draf
     }
     const response = await fake.fetcher(input, init);
     if (calls !== 2) return response;
-    const operations = request.tools[0].function.parameters.properties.operations;
+    const operations = request.tools.find((item: { function: { name: string } }) => item.function.name === 'scene_apply').function.parameters.properties.operations;
     assert.equal(operations.items.oneOf[0].properties.object.properties.color.type, 'integer');
     assert.equal(operations.items.oneOf[0].additionalProperties, false);
     correct = await response.json();

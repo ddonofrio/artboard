@@ -3,7 +3,7 @@ import { resolve, sep } from 'node:path';
 import { fail, type PixelImage, type Scene, type ToolAdapter } from '../../core/index.js';
 import { encodePNG } from './encoding.js';
 
-export { encodePNG, encodeJPEG } from './encoding.js';
+export { encodePNG, encodeJPEG, encodeVisionJPEG } from './encoding.js';
 export { OutputStore, drawingDate, drawingName, validateBatchOutput, type BatchOutput } from './outputs.js';
 export class NodeAdapter implements ToolAdapter {
   private root: string;

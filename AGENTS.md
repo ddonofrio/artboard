@@ -20,6 +20,8 @@ Artboard owns drawing. Story generation, narration, player choices, and game ses
 
 Write source, comments, prompts, errors, examples, and documentation in English. Update directly affected documentation with implementation. Preserve the drawing contracts when reorganizing the agent workflow.
 
+Tool failures must be actionable: identify the tool, the failed operation/field when known, and the expected argument format or recovery action. Generic errors such as "invalid arguments" or union-schema failures are insufficient on their own. Select validation errors from the object's actual kind, and include concise tool usage guidance. Preserve the original diagnostic cause for transport, adapter and persistence failures; never present them as argument mistakes.
+
 Run typecheck, non-mutating lint, and relevant tests. Build for browser or package integration changes. Verify behavior without a visual review. Do not stage, commit, push, or deploy without an explicit request.
 
 Package manifests and the lockfile own dependency versions and commands. TypeScript and schemas own API shape. Tests own executable invariants. Keep documentation about current responsibilities and behavior; do not add change histories or speculative designs.

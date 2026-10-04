@@ -4,6 +4,16 @@ import { PixelRenderer } from './renderer.js';
 import { fail, SceneError, sceneSchema, toolSchemas, validateTool } from './schema.js';
 import type { Bounds, Operation, Palette, Params, RecipeId, Scene, ToolAdapter, ToolRequest, ToolResult } from './types.js';
 
+const usage: Record<string, string> = {
+  scene_catalog: 'Query category=palettes/materials/objects/recipes/assets/tools, optionally with an id from that category.',
+  scene_create: 'Pass scene_id and optional width,height,palette,seed; use an unused scene_id.',
+  scene_inspect: 'Pass scene_id and optionally ids:[existingObjectId,...]; omit ids for a summary.',
+  scene_apply: 'Pass scene_id and operations:[{op:"add",object:{id,kind,layer,...}},{op:"update",id,changes:{...}}]. Ellipse uses bounds:[x,y,width,height]; polygon uses at least 3 [x,y] points; line uses at least 2. Use existing IDs for update/remove/reorder and valid palette indices. Failed batches are not applied.',
+  scene_render: 'Pass scene_id; crop:[x,y,width,height] must fit the canvas and scale must be an integer 1-4.',
+  scene_history: 'Pass scene_id, action:"undo"/"redo", and steps=1..64 within available history.',
+  scene_io: 'Pass scene_id and action:"palette" with palette, or action:"save"/"load"/"export" with an adapter-scoped filename. Load can also receive scene JSON.',
+};
+
 export class SceneTools {
   constructor(public readonly store: SceneStore, public readonly renderer: PixelRenderer, private readonly adapter: ToolAdapter) {}
   private async run(tool: string, args: Record<string, unknown>, execute: () => unknown | Promise<unknown>): Promise<ToolResult> {
@@ -15,9 +25,10 @@ export class SceneTools {
         const detail = { ...error.detail };
         const match = detail.field?.match(/operations\/(\d+)/);
         if (match && detail.operation === undefined) detail.operation = Number(match[1]);
+        detail.message = `${tool}: ${detail.message} Usage: ${usage[tool] ?? 'Use an advertised tool and its argument schema.'}`;
         return { ok: false, error: detail };
       }
-      return { ok: false, error: { code: 'ADAPTER_ERROR', message: error instanceof Error ? error.message : 'Adapter failed' } };
+      return { ok: false, error: { code: 'ADAPTER_ERROR', message: `${tool}: ${error instanceof Error ? error.message : 'The adapter failed without a diagnostic.'} Check the configured image/file adapter before retrying. Usage: ${usage[tool] ?? 'Use an advertised tool and its argument schema.'}` } };
     }
   }
   scene_catalog(args: Record<string, unknown> = {}): Promise<ToolResult> {
@@ -73,7 +84,7 @@ export class SceneTools {
     });
   }
   async dispatch(request: ToolRequest): Promise<ToolResult> {
-    if (!request || typeof request !== 'object' || typeof request.tool !== 'string') return { ok: false, error: { code: 'VALIDATION', message: 'Request requires tool and arguments', field: 'tool' } };
+    if (!request || typeof request !== 'object' || typeof request.tool !== 'string') return { ok: false, error: { code: 'VALIDATION', message: 'dispatch: Request requires tool and arguments. Usage: {tool:"scene_apply",arguments:{scene_id,operations:[...]}}; use a tool name from scene_catalog category="tools".', field: 'tool' } };
     const args = request.arguments;
     switch (request.tool) {
       case 'scene_catalog': return this.scene_catalog(args ?? {});
@@ -83,7 +94,7 @@ export class SceneTools {
       case 'scene_render': return this.scene_render(args);
       case 'scene_history': return this.scene_history(args);
       case 'scene_io': return this.scene_io(args);
-      default: return { ok: false, error: { code: 'UNKNOWN_TOOL', message: `Unknown tool: ${request.tool}`, field: 'tool' } };
+      default: return { ok: false, error: { code: 'UNKNOWN_TOOL', message: `dispatch: Unknown tool: ${request.tool}. Usage: choose a tool from scene_catalog category="tools" and pass {tool,arguments}.`, field: 'tool' } };
     }
   }
 }
