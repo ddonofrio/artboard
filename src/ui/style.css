@@ -1,25 +1,108 @@
+@font-face {
+  font-family: 'IBM VGA';
+  src: url('/fonts/WebPlus_IBM_VGA_8x16.woff') format('woff');
+  font-weight: 400;
+  font-style: normal;
+  font-display: block;
+}
+
 :root {
-  font-family: system-ui, sans-serif;
+  font: 16px/16px 'IBM VGA', monospace;
   color: #f1efe9;
   background: #171b22;
   font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
+  font-variant-ligatures: none;
+  -webkit-font-smoothing: none;
+  -webkit-text-size-adjust: none;
+  text-size-adjust: none;
 }
 
 * { box-sizing: border-box; }
-body { margin: 0; min-width: 280px; }
-main {
-  display: flex;
-  min-height: 100svh;
-  padding: 3rem 1.5rem;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
+body { margin: 0; }
+.workspace {
+  display: grid;
+  grid-template-columns: minmax(0, .95fr) minmax(0, 1.5fr) minmax(0, 1fr);
+  gap: 8px;
+  height: 100svh;
+  padding: 8px;
 }
-img { margin-bottom: 1.5rem; }
-.eyebrow { color: #e7bb71; letter-spacing: .16em; text-transform: uppercase; }
-h1 { margin: .25rem 0 1rem; font-size: clamp(2rem, 7vw, 4rem); line-height: 1.1; }
-p { max-width: 34rem; margin: .5rem 0; line-height: 1.6; }
-.status { color: #a9afb9; font-size: .9rem; }
+[data-frame] { position: relative; }
+.panel { min-width: 0; min-height: 0; }
+.prompt-panel { align-self: start; }
+.prompt-panel > .panel-content { height: auto; }
+.monitor-panel { align-self: start; }
+.monitor-panel > .panel-content { height: auto; }
+.frame { position: absolute; inset: 0; overflow: hidden; pointer-events: none; user-select: none; color: #a9afb9; }
+.edge { position: absolute; left: 0; right: 0; display: flex; height: 16px; white-space: pre; }
+.edge > span:first-child, .edge > span:last-child { flex: 0 0 8px; }
+.top { top: 0; }
+.bottom { bottom: 0; }
+.line { flex: 1; min-width: 0; overflow: hidden; }
+.side { position: absolute; top: 16px; bottom: 16px; width: 8px; white-space: pre; overflow: hidden; }
+.left { left: 0; }
+.right { right: 0; }
+.title-prefix { flex: 0 0 8px; }
+.title { display: block; flex: 0 0 auto; height: 16px; line-height: 16px; white-space: pre; background: #171b22; color: inherit; }
+.title-label { color: #e7bb71; }
+
+h1, h2, h3, p, figure, dl, dd, ol, pre { margin: 0; font: inherit; }
+button, textarea, input, select, summary { font: inherit; color: inherit; }
+[hidden] { display: none !important; }
+.panel-content { height: 100%; min-height: 0; overflow: auto; padding: 24px 16px 16px; display: flex; flex-direction: column; gap: 16px; scrollbar-width: thin; scrollbar-color: #a9afb9 #171b22; }
+.panel-content > * { flex-shrink: 0; }
+.box { position: relative; min-width: 0; padding: 24px 16px 16px; display: flex; flex-direction: column; gap: 16px; }
+.frame { z-index: 1; }
+.box p, figcaption, summary, .checkbox-row, .scene-footer, .metrics { overflow-wrap: anywhere; }
+.muted { color: #a9afb9; }
+.status { color: #e7bb71; }
+button { border: 0; border-radius: 0; background: transparent; cursor: pointer; }
+button:disabled { cursor: default; color: #a9afb9; }
+button:focus-visible, summary:focus-visible { outline: 1px solid #e7bb71; outline-offset: 0; }
+.workspace-tabs { display: flex; flex-wrap: wrap; gap: 8px; }
+.workspace-tabs button { padding: 8px 0; }
+.workspace-tabs button[aria-selected='true'] { color: #e7bb71; }
+.input-box { height: 128px; padding: 16px; }
+.batch-text { height: 224px; }
+textarea, input, select { border: 0; border-radius: 0; background: #171b22; padding: 0; width: 100%; min-width: 0; caret-color: #e7bb71; }
+textarea { display: block; height: 100%; resize: none; line-height: 16px; }
+textarea::placeholder, input::placeholder { color: #a9afb9; opacity: 1; }
+textarea:focus, input:focus, select:focus { outline: 0; }
+.input-box:focus-within > .frame, .field-box:focus-within > .frame { color: #e7bb71; }
+.button-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.prompt-send { position: absolute; bottom: 0; right: 16px; z-index: 2; height: 16px; padding: 0 8px; line-height: 16px; background: #171b22; color: #f1efe9; }
+.send-gap { flex: 0 0 auto; white-space: pre; visibility: hidden; }
+.send-suffix { flex: 0 0 8px; }
+.dos-button { position: relative; min-height: 48px; max-width: 100%; padding: 16px; text-align: left; }
+.dos-button > .frame { color: #a9afb9; }
+.checkbox-row { display: flex; gap: 8px; align-items: flex-start; position: relative; cursor: pointer; }
+.layer-row { display: flex; align-items: center; gap: 8px; }
+.layer-row input { width: 4ch; border-bottom: 1px solid #a9afb9; text-align: center; appearance: textfield; }
+.layer-row input::-webkit-inner-spin-button, .layer-row input::-webkit-outer-spin-button { appearance: none; margin: 0; }
+.checkbox-row input { position: absolute; width: 24px; height: 16px; margin: 0; opacity: 0; }
+.check-glyph { flex: 0 0 24px; white-space: pre; }
+.check-glyph::before { content: '[ ]'; }
+.checkbox-row input:checked + .check-glyph::before { content: '[x]'; }
+.checkbox-row input:focus-visible + .check-glyph { outline: 1px solid #e7bb71; }
+.settings { display: block; padding-top: 16px; }
+summary { list-style: none; cursor: pointer; }
+summary::-webkit-details-marker { display: none; }
+summary::before { content: '[+] '; color: #e7bb71; }
+details[open] > summary::before { content: '[-] '; }
+.settings-fields { display: grid; gap: 8px; padding-top: 16px; }
+.settings-fields .checkbox-row { margin: 8px 0; }
+.field-box { min-height: 48px; padding: 16px; }
+.field-box select { appearance: none; padding-right: 16px; }
+.field-box:has(select)::after { content: '▼'; position: absolute; right: 16px; top: 16px; pointer-events: none; color: #e7bb71; }
+.canvas-panel { align-self: start; padding: 16px 8px; }
+canvas { display: block; width: 100%; height: auto; aspect-ratio: 4 / 3; image-rendering: pixelated; }
+.metrics { display: grid; gap: 16px; }
+.metrics > div { display: flex; justify-content: space-between; gap: 8px; }
+.metrics dd { color: #e7bb71; }
+.agent-events, .batch-items { list-style: none; padding: 0; }
+.batch-items:empty { display: none; }
+.prompt-inspector { gap: 16px; }
+.prompt-inspector pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+progress { width: 100%; height: 16px; appearance: none; background: #171b22; color: #a9afb9; }
+progress::-webkit-progress-bar { background: #171b22; border: 1px solid #a9afb9; }
+progress::-webkit-progress-value { background: #e7bb71; }
+progress::-moz-progress-bar { background: #e7bb71; }

@@ -9,7 +9,7 @@ npm ci
 npm run dev
 ```
 
-Vite serves the new English work-in-progress page at the local URL printed in the terminal. It does not start inference or an agent service. The UI uses vanilla TypeScript and CSS without a framework. Agent dependencies are installed for the separate drawing workflow, not imported into the browser.
+Vite serves the three-column DOS-style interface at the local URL printed in the terminal. It does not start inference or an agent service. The UI uses vanilla TypeScript and CSS without a framework. Agent dependencies are installed for the separate drawing workflow, not imported into the browser.
 
 ## Validation and outputs
 
@@ -17,10 +17,13 @@ Vite serves the new English work-in-progress page at the local URL printed in th
 npm run typecheck
 npm run lint
 npm test
+npm run test:ui
 npm run build
 ```
 
 Typecheck validates the runtime, scripts, and tests, then the UI with browser types. Lint enforces allowed imports for each layer. Tests exercise deterministic rendering, transactional edits, history, schema validation, SDK tool calls, review handoffs, cancellation, timeouts, partial results, and loop recovery without a live model server.
+
+`npm run test:ui` runs headless Playwright checks against an isolated Vite server. It checks the approved column structure, local controls without requests, numerical Stats, layer-count range, content-sized prompt and monitor, nested frame positioning, title gaps, font loading, and canvas sizing on resize. It does not capture screenshots or perform visual reviews. Chrome is the default browser; set `UI_BROWSER=chromium` after `npx playwright install chromium` to use Playwright's bundled browser. Test output is ignored in `outputs/ui-tests`. The UI remains unconnected to drawing execution and agents.
 
 Build creates the static browser application in `dist` and independent ESM library entries with TypeScript declarations in `dist-lib`. The package exports core at `artboard`, orchestration at `artboard/agents`, and the filesystem/image adapter at `artboard/node`. Library output excludes public UI assets. `npm run preview` serves the built browser application.
 

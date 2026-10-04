@@ -22,6 +22,7 @@
     "src/adapters",
     "scripts",
     "tests",
-    "vite.config.ts"
+    "vite.config.ts",
+    "playwright.config.ts"
   ]
 }

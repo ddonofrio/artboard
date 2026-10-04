@@ -51,7 +51,7 @@ Artboard is designed as a reusable component. Adventure is its original home, bu
 
 **Under development.** The drawing application is being explored and refined, and its visual style is still evolving.
 
-The repository contains the drawing core, a separate editor/reviewer workflow, Node adapters, and a new Vite work-in-progress page. Artboard is the maintained drawing component of Adventure. Story generation, narration, player choices, and game sessions stay in Adventure.
+The repository contains the drawing core, a separate editor/reviewer workflow, Node adapters, and a DOS-style browser interface with prompt, canvas, and monitor columns. The UI is not connected to drawing execution or agents yet. Artboard is the maintained drawing component of Adventure. Story generation, narration, player choices, and game sessions stay in Adventure.
 
 ## Start
 
@@ -60,7 +60,7 @@ npm ci
 npm run dev
 ```
 
-Use Node.js 22.12 or newer. On Windows PowerShell, use `npm.cmd` if execution policy blocks `npm.ps1`. The browser shows an English **Work in progress** page. No model connection is required to start it.
+Use Node.js 22.12 or newer. On Windows PowerShell, use `npm.cmd` if execution policy blocks `npm.ps1`. The browser shows the unconnected DOS-style UI. No model connection is required to start it. See the [browser interface](src/ui/README.md) for its controls and integration boundary.
 
 ## Structure
 
@@ -68,9 +68,9 @@ Use Node.js 22.12 or newer. On Windows PowerShell, use `npm.cmd` if execution po
 src/core/           Drawing contracts, tools, rendering, catalogs, and history
 src/agents/         Drawing editor/reviewer workflow and model transport
 src/adapters/node/  Filesystem persistence and image encoding
-src/ui/             New browser interface, currently a placeholder
+src/ui/             Three-column DOS-style browser interface
 scripts/            Node commands and reproducible artifact generation
-tests/              Drawing and agent invariants
+tests/              Drawing, agent, and browser UI invariants
 schemas/            Generated scene and tool JSON contracts
 ```
 

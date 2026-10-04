@@ -4,17 +4,29 @@
   "private": true,
   "description": "Retro scene drawing tools for AI agents and Adventure.",
   "type": "module",
-  "engines": { "node": ">=22.12.0" },
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "exports": {
-    ".": { "types": "./dist-lib/core/index.d.ts", "import": "./dist-lib/index.js" },
-    "./agents": { "types": "./dist-lib/agents/index.d.ts", "import": "./dist-lib/agents.js" },
-    "./node": { "types": "./dist-lib/adapters/node/index.d.ts", "import": "./dist-lib/node.js" }
+    ".": {
+      "types": "./dist-lib/core/index.d.ts",
+      "import": "./dist-lib/index.js"
+    },
+    "./agents": {
+      "types": "./dist-lib/agents/index.d.ts",
+      "import": "./dist-lib/agents.js"
+    },
+    "./node": {
+      "types": "./dist-lib/adapters/node/index.d.ts",
+      "import": "./dist-lib/node.js"
+    }
   },
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.ui.json",
-    "lint": "eslint src scripts tests vite.config.ts eslint.config.js",
+    "lint": "eslint src scripts tests vite.config.ts playwright.config.ts eslint.config.js",
     "test": "node --import tsx --test tests/*.test.ts",
+    "test:ui": "playwright test",
     "build": "vite build && vite build --mode library && tsc -p tsconfig.lib.json",
     "preview": "vite preview --host 127.0.0.1",
     "schemas": "tsx scripts/schemas.ts",
@@ -31,6 +43,7 @@
     "pngjs": "7.0.0"
   },
   "devDependencies": {
+    "@playwright/test": "1.63.0",
     "@types/node": "24.7.0",
     "@types/pngjs": "6.0.5",
     "eslint": "9.36.0",
