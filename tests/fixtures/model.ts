@@ -16,6 +16,7 @@ export interface ChatRequest {
 }
 interface Context {
   prompt: string; scene_id: string; round: number; current_scene?: Scene; draft?: { scene: Scene };
+  continuation?: string;
   workflow?: { role: string; stage_index: number; final: boolean; history: unknown[]; previous: unknown };
   review?: unknown;
 }

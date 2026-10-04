@@ -286,24 +286,30 @@ test('an unchanged or invisible correction cannot bypass the rejected review; ta
   assert.ok(gate.kind === 'procedural' && gate.params?.bar_count === 4);
 });
 
-test('a model that ends before submission still delivers the latest canvas, including an empty created canvas', async () => {
-  for (const stopAfter of [1, 2, 3, 5]) {
-    const fake = simulatedServer(), tools = host(), events: AgentEvent[] = [];
-    let calls = 0;
-    const result = await runAgentLoop({ tools, prompt: 'Cave', config: { editor_model: 'vl' }, onEvent: event => events.push(event), fetch: async (input, init) => {
-      if (++calls <= stopAfter) return fake.fetcher(input, init);
-      return Response.json({ id: 'stopped', object: 'chat.completion', created: 1, model: 'vl', choices: [{ index: 0, finish_reason: 'length', message: { role: 'assistant', content: 'No more turns.' } }] });
-    } });
-    assert.equal(result.stop_reason, 'incomplete');
-    assert.equal(result.approved, false);
-    assert.ok(result.error);
-    assert.deepEqual(result.draft.scene, tools.store.get('artboard'));
-    assert.equal(result.draft.scene.revision, stopAfter === 1 ? 0 : stopAfter === 5 ? 2 : 1);
-    assert.equal(result.draft.preview.revision, result.draft.scene.revision);
-    assert.deepEqual(result.drafts.at(-1), result.draft);
-    assert.equal(events.filter(event => event.type === 'final').length, 1);
-    assert.equal(events.at(-1)!.type, 'final');
-  }
+test('editor starts a fresh inference with the original request and current image after exhausting output tokens', async () => {
+  const tools = host(), requests: ChatRequest[] = [];
+  const fetcher: typeof fetch = async (_input, init) => {
+    const request = JSON.parse(String(init?.body)) as ChatRequest;
+    requests.push(request);
+    if (requests.length === 2) return Response.json({ id: 'exhausted', object: 'chat.completion', created: 1, model: 'vl', choices: [{ index: 0, finish_reason: 'length', message: { role: 'assistant', content: 'thinking' } }] });
+    const call = requests.length === 1 ? 'scene_apply' : 'finish_draft';
+    const args = requests.length === 1
+      ? { scene_id: 'artboard', operations: [{ op: 'add', object: { id: 'ground', kind: 'polygon', points: [[0, 40], [64, 40], [64, 48], [0, 48]], color: 'Green', layer: 1 } }] }
+      : { revision: 1 };
+    return Response.json({ id: `recovered-${requests.length}`, object: 'chat.completion', created: 1, model: 'vl', choices: [{ index: 0, finish_reason: 'tool_calls', message: { role: 'assistant', content: null, tool_calls: [{ id: `call-${requests.length}`, type: 'function', function: { name: call, arguments: JSON.stringify(args) } }] } }] });
+  };
+  const result = await runAgentLoop({ tools, prompt: 'A green ground', config: { editor_model: 'vl', vision: true }, review: false, fetch: fetcher });
+  assert.equal(result.stop_reason, 'unreviewed');
+  assert.equal(result.draft.scene.revision, 1);
+  assert.equal(requests.length, 3);
+  const continuationMessage = requests[2].messages.filter(message => message.role === 'user').at(-1)!;
+  const continuationText = typeof continuationMessage.content === 'string' ? continuationMessage.content : continuationMessage.content!.find(part => part.type === 'text')!.text!;
+  const continuation = JSON.parse(continuationText) as { prompt: string; continuation?: string; current_scene?: Scene };
+  assert.equal(continuation.prompt, 'A green ground');
+  assert.match(String(continuation.continuation), /current canvas/);
+  assert.equal(continuation.current_scene?.revision, 1);
+  assert.ok(Array.isArray(requests[2].messages.at(-1)?.content));
+  assert.ok((requests[2].messages.at(-1)?.content as { type: string }[]).some(part => part.type === 'image_url'));
 });
 
 test('model transport errors after drawing deliver the current canvas without claiming approval', async () => {
@@ -320,14 +326,6 @@ test('model transport errors after drawing deliver the current canvas without cl
     assert.deepEqual(result.draft.scene, tools.store.get('artboard'));
     assert.equal(result.draft.scene.revision, stopAfter === 1 ? 0 : stopAfter === 5 ? 2 : 1);
   }
-});
-
-test('ending before any drawing reports an incomplete prepared canvas', async () => {
-  const events: AgentEvent[] = [];
-  const result = await runAgentLoop({ tools: host(), prompt: 'Cave', config: { editor_model: 'vl' }, onEvent: event => events.push(event), fetch: async () => Response.json({ id: 'empty', object: 'chat.completion', created: 1, model: 'vl', choices: [{ index: 0, finish_reason: 'length', message: { role: 'assistant', content: '' } }] }) });
-  assert.equal(result.stop_reason, 'incomplete');
-  assert.equal(result.draft.scene.width, 640);
-  assert.equal(events.filter(event => event.type === 'final').length, 1);
 });
 
 test('XML embedded in function arguments is rejected with protocol guidance, then native calls recover', async () => {

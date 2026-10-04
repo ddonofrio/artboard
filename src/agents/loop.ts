@@ -1,5 +1,5 @@
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
-import { streamText, type ModelMessage, type StepResult, type ToolSet } from 'ai';
+import { streamText, ToolChoiceViolationError, type ModelMessage, type StepResult, type ToolSet } from 'ai';
 import { BASIC_PALETTE, requireResult, type PixelImage, type Scene, type SceneTools, type ToolResult } from '../core/index.js';
 import { agentConfig, listModels, type AgentConfig } from './config.js';
 import { drawingRequest, EDITOR_INSTRUCTIONS, REVIEWER_INSTRUCTIONS } from './prompts.js';
@@ -163,6 +163,10 @@ export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunRe
       return await response.finalStep;
     } catch (error) {
       options.signal?.throwIfAborted();
+      // An enforced tool choice plus finish_reason=length means this response
+      // spent its output budget thinking without reaching a tool call. The
+      // editor loop can recover with a fresh request and current canvas.
+      if (ToolChoiceViolationError.isInstance(error)) throw error;
       const duration = config.timeout_ms % 60000 === 0 ? `${config.timeout_ms / 60000} minutes` : `${config.timeout_ms / 1000} seconds`;
       const timedOut = error instanceof Error && /timeout|timed out/i.test(`${error.name} ${error.message}`);
       const message = timedOut ? `${activeRole === 'editor' ? 'Editor' : 'Reviewer'} · request ${phaseSteps + 1}: timed out after ${duration} waiting for a model response.` : error instanceof Error ? error.message : String(error);
@@ -332,9 +336,33 @@ export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunRe
       },
       onStepFinish: reportStep('editor', round, editorModel),
     };
-    const text = drawingRequest(options.prompt, { scene_id: sceneId, round, review: pendingReview ?? null, current_scene: host.store.get(sceneId), image_attached: false, vision_available: config.vision, ...(options.stage ? { workflow: options.stage.context } : {}) });
-    try { await consume(editor, phaseMessages(text)); }
-    catch (error) { return incomplete(error, error instanceof Error && error.name === 'AI_ToolChoiceViolationError'); }
+    let text = drawingRequest(options.prompt, { scene_id: sceneId, round, review: pendingReview ?? null, current_scene: host.store.get(sceneId), image_attached: false, vision_available: config.vision, ...(options.stage ? { workflow: options.stage.context } : {}) });
+    while (!submission) {
+      try {
+        await consume(editor, phaseMessages(text));
+      } catch (error) {
+        options.signal?.throwIfAborted();
+        if (!ToolChoiceViolationError.isInstance(error) || error.finishReason !== 'length') return incomplete(error);
+
+        // Discard the exhausted conversation. Re-present the original request
+        // and a fresh snapshot so the next inference can continue from what is
+        // actually on the canvas instead of repeating blind reasoning.
+        const scene = host.store.get(sceneId);
+        const preview = requireResult<AgentDraft['preview']>(await host.scene_render({ scene_id: sceneId }));
+        requestedImages.editor.length = 0;
+        if (config.vision) requestedImages.editor.push(preview);
+        text = drawingRequest(options.prompt, {
+          scene_id: sceneId,
+          round,
+          review: pendingReview ?? null,
+          current_scene: scene,
+          image_attached: false,
+          vision_available: config.vision,
+          continuation: 'A previous fresh response exhausted its output tokens before calling a tool. Continue the original user request from the current canvas shown here. Preserve completed work, do not repeat successful edits, identify what remains, and take the next concrete action. If the request is complete, call finish_draft with the current revision.',
+          ...(options.stage ? { workflow: options.stage.context } : {}),
+        });
+      }
+    }
     options.signal?.throwIfAborted();
     if (!submission) return incomplete(new Error(phaseFailure('Editor', 'finish_draft')), true);
     const scene = host.store.get(sceneId);
