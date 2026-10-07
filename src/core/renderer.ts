@@ -1,5 +1,5 @@
 import { expandGenerator } from './generators.js';
-import { idSeed, materialSampler } from './materials.js';
+import { idSeed, materialSampler, orderedDither } from './materials.js';
 import { fail, validateScene } from './schema.js';
 import { RENDERER_VERSION, type Bounds, type PixelImage, type Point, type RenderOptions, type Scene, type SceneObject, type SpriteAsset } from './types.js';
 
@@ -52,6 +52,16 @@ export class PixelRenderer {
     };
     const draw = (obj: SceneObject) => {
       if (obj.kind === 'procedural') { for (const part of expandGenerator({ ...obj, seed: obj.seed ?? idSeed(scene.seed, obj.id) })) draw(part); return; }
+      if ((obj.kind === 'polygon' || obj.kind === 'line') && obj.rotation && obj.rotation % 360 !== 0) {
+        const xs = obj.points.map(point => point[0]), ys = obj.points.map(point => point[1]);
+        const cx = (Math.min(...xs) + Math.max(...xs)) / 2, cy = (Math.min(...ys) + Math.max(...ys)) / 2;
+        const angle = obj.rotation * Math.PI / 180, cos = Math.cos(angle), sin = Math.sin(angle);
+        const rotate = (point: Point): Point => [cx + (point[0] - cx) * cos - (point[1] - cy) * sin, cy + (point[0] - cx) * sin + (point[1] - cy) * cos];
+        const points = obj.points.map(rotate);
+        const mapping = obj.kind === 'polygon' && obj.mapping ? { ...obj.mapping, quad: obj.mapping.quad.map(rotate) } : undefined;
+        draw({ ...obj, rotation: 0, points, ...(obj.kind === 'polygon' && mapping ? { mapping } : {}) });
+        return;
+      }
       if (obj.kind === 'star') {
         const tips = obj.tips ?? 5, inner = obj.inner_radius ?? obj.radius * (3 - Math.sqrt(5)) / 2;
         const start = ((obj.rotation ?? 0) - 90) * Math.PI / 180;
@@ -59,7 +69,7 @@ export class PixelRenderer {
           const angle = start + i * Math.PI / tips, radius = i % 2 ? inner : obj.radius;
           return [obj.center[0] + Math.cos(angle) * radius, obj.center[1] + Math.sin(angle) * radius];
         });
-        draw({ ...obj, kind: 'polygon', points });
+        draw({ ...obj, kind: 'polygon', rotation: 0, points });
         return;
       }
       if (obj.kind === 'sprite') {
@@ -85,13 +95,25 @@ export class PixelRenderer {
       const [left, top, w, h] = bounds;
       const sampler = materialSampler(obj.color === undefined ? obj.material : undefined, obj.seed ?? idSeed(scene.seed, obj.id), obj.kind === 'polygon' && obj.mapping ? obj.mapping.size[1] : h, obj.color ?? 3);
       const transform = obj.kind === 'polygon' && obj.mapping ? quadMapping(obj.mapping.quad, obj.mapping.size) : (x: number, y: number): Point => [x - left, y - top];
-      const paint = (x: number, y: number) => { const [u, v] = transform(x + 0.5, y + 0.5); plot(x, y, sampler(u, v)); };
+      const paint = (x: number, y: number, patternX = x + 0.5 - left, patternY = y + 0.5 - top) => {
+        if (obj.fill === 'none') return;
+        if (typeof obj.fill === 'number') { plot(x, y, obj.fill); return; }
+        if (obj.fill && typeof obj.fill === 'object') {
+          plot(x, y, orderedDither(x, y, obj.fill.ratio) ? obj.fill.colors[1] : obj.fill.colors[0]);
+          return;
+        }
+        const [u, v] = transform(x + 0.5, y + 0.5);
+        plot(x, y, sampler(obj.kind === 'ellipse' ? patternX : u, obj.kind === 'ellipse' ? patternY : v));
+      };
       if (obj.kind === 'ellipse') {
-        const rx = w / 2, ry = h / 2, stroke = obj.stroke_width ?? 1;
-        for (let y = Math.max(0, Math.floor(top)); y < Math.min(height, Math.ceil(top + h)); y++) for (let x = Math.max(0, Math.floor(left)); x < Math.min(width, Math.ceil(left + w)); x++) {
-          const a = x + 0.5 - left - rx, b = y + 0.5 - top - ry;
+        const rx = w / 2, ry = h / 2, stroke = obj.stroke_width ?? 1, cx = left + rx, cy = top + ry;
+        const angle = (obj.rotation ?? 0) * Math.PI / 180, cos = Math.cos(angle), sin = Math.sin(angle);
+        const extentX = Math.sqrt((rx * cos) ** 2 + (ry * sin) ** 2), extentY = Math.sqrt((rx * sin) ** 2 + (ry * cos) ** 2);
+        for (let y = Math.max(0, Math.floor(cy - extentY)); y < Math.min(height, Math.ceil(cy + extentY)); y++) for (let x = Math.max(0, Math.floor(cx - extentX)); x < Math.min(width, Math.ceil(cx + extentX)); x++) {
+          const dx = x + 0.5 - cx, dy = y + 0.5 - cy;
+          const a = dx * cos + dy * sin, b = -dx * sin + dy * cos;
           if ((a / rx) ** 2 + (b / ry) ** 2 > 1) continue;
-          paint(x, y);
+          paint(x, y, a + rx, b + ry);
           if (obj.outline !== undefined && (rx <= stroke || ry <= stroke || (a / (rx - stroke)) ** 2 + (b / (ry - stroke)) ** 2 >= 1)) plot(x, y, obj.outline);
         }
       } else {

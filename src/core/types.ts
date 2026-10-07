@@ -6,6 +6,8 @@ export type GeneratorId = 'rock_wall' | 'opening' | 'gate' | 'tree' | 'building'
 export type RecipeId = 'cave_entrance' | 'forest_path' | 'village_exterior' | 'stone_corridor' | 'wooden_room' | 'utility_room';
 export interface Palette { id: string; name: string; colors: string[] }
 export interface Material { id: MaterialId; params?: Params }
+export interface DitherFill { colors: [number, number]; ratio: number }
+export type ShapeFill = number | 'none' | DitherFill;
 export interface ObjectBase {
   id: string;
   layer: number;
@@ -16,9 +18,9 @@ export interface ObjectBase {
   outline?: number;
   stroke_width?: number;
 }
-export interface PolygonObject extends ObjectBase { kind: 'polygon'; points: Point[]; mapping?: { quad: Point[]; size: Point } }
-export interface LineObject extends ObjectBase { kind: 'line'; points: Point[] }
-export interface EllipseObject extends ObjectBase { kind: 'ellipse'; bounds: Bounds }
+export interface PolygonObject extends ObjectBase { kind: 'polygon'; points: Point[]; rotation?: number; fill?: ShapeFill; mapping?: { quad: Point[]; size: Point } }
+export interface LineObject extends ObjectBase { kind: 'line'; points: Point[]; rotation?: number }
+export interface EllipseObject extends ObjectBase { kind: 'ellipse'; bounds: Bounds; rotation?: number; fill?: ShapeFill }
 export interface StarObject extends ObjectBase { kind: 'star'; center: Point; radius: number; tips?: number; inner_radius?: number; rotation?: number }
 export interface ProceduralObject extends ObjectBase { kind: 'procedural'; generator: GeneratorId; bounds: Bounds; params?: Params }
 export interface SpriteObject extends ObjectBase { kind: 'sprite'; asset: string; bounds: Bounds }

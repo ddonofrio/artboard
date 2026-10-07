@@ -9,9 +9,9 @@ export const paletteSchema = objectSchema({ id: { const: BASIC_PALETTE.id }, nam
 const materialSchema = { oneOf: Object.entries(materials).map(([key, entry]) => objectSchema({ id: { const: key }, params: objectSchema(entry.parameters) }, ['id'])) };
 const base = { id, layer: integer(-1000, 1000), seed: integer(0, 4294967295), tags: { type: 'array', maxItems: 16, uniqueItems: true, items: { type: 'string', maxLength: 80 } }, material: materialSchema, color: integer(0, 15), outline: integer(0, 15), stroke_width: integer(1, 24) };
 export const sceneObjectSchema: Schema = { oneOf: [
-  objectSchema({ ...base, kind: { const: 'polygon' }, points: { ...points, minItems: 3 }, mapping: objectSchema({ quad: { ...points, minItems: 4, maxItems: 4 }, size: { type: 'array', items: number(1, 2048), minItems: 2, maxItems: 2 } }, ['quad', 'size']) }, ['id', 'kind', 'layer', 'points']),
-  objectSchema({ ...base, kind: { const: 'line' }, points }, ['id', 'kind', 'layer', 'points']),
-  objectSchema({ ...base, kind: { const: 'ellipse' }, bounds: boundsSchema }, ['id', 'kind', 'layer', 'bounds']),
+  objectSchema({ ...base, kind: { const: 'polygon' }, points: { ...points, minItems: 3 }, rotation: number(-360, 360), fill: { anyOf: [integer(0, 15), { const: 'none' }, objectSchema({ colors: { type: 'array', items: integer(0, 15), minItems: 2, maxItems: 2 }, ratio: number(0, 1) }, ['colors', 'ratio'])] }, mapping: objectSchema({ quad: { ...points, minItems: 4, maxItems: 4 }, size: { type: 'array', items: number(1, 2048), minItems: 2, maxItems: 2 } }, ['quad', 'size']) }, ['id', 'kind', 'layer', 'points']),
+  objectSchema({ ...base, kind: { const: 'line' }, points, rotation: number(-360, 360) }, ['id', 'kind', 'layer', 'points']),
+  objectSchema({ ...base, kind: { const: 'ellipse' }, bounds: boundsSchema, rotation: number(-360, 360), fill: { anyOf: [integer(0, 15), { const: 'none' }, objectSchema({ colors: { type: 'array', items: integer(0, 15), minItems: 2, maxItems: 2 }, ratio: number(0, 1) }, ['colors', 'ratio'])] } }, ['id', 'kind', 'layer', 'bounds']),
   objectSchema({ ...base, kind: { const: 'sprite' }, bounds: boundsSchema, asset: id }, ['id', 'kind', 'layer', 'bounds', 'asset']),
   objectSchema({ ...base, kind: { const: 'star' }, center: pointSchema, radius: number(0.5, 2048), tips: integer(3, 32, 5), inner_radius: number(0.01, 2048), rotation: number(-360, 360, 0) }, ['id', 'kind', 'layer', 'center', 'radius']),
   ...Object.entries(generators).map(([key, entry]) => objectSchema({ ...base, kind: { const: 'procedural' }, bounds: boundsSchema, generator: { const: key }, params: objectSchema(entry.parameters) }, ['id', 'kind', 'layer', 'bounds', 'generator'])),
@@ -23,7 +23,7 @@ export const sceneSchema = {
 };
 const operationSchema = { oneOf: [
   objectSchema({ op: { const: 'add' }, object: sceneObjectSchema }, ['op', 'object']),
-  objectSchema({ op: { const: 'update' }, id, changes: { type: 'object', minProperties: 1, maxProperties: 16, propertyNames: { enum: ['layer', 'seed', 'tags', 'material', 'color', 'outline', 'stroke_width', 'points', 'bounds', 'mapping', 'params', 'center', 'radius', 'tips', 'inner_radius', 'rotation'] } } }, ['op', 'id', 'changes']),
+  objectSchema({ op: { const: 'update' }, id, changes: { type: 'object', minProperties: 1, maxProperties: 16, propertyNames: { enum: ['layer', 'seed', 'tags', 'material', 'color', 'outline', 'stroke_width', 'points', 'bounds', 'mapping', 'params', 'center', 'radius', 'tips', 'inner_radius', 'rotation', 'fill'] } } }, ['op', 'id', 'changes']),
   objectSchema({ op: { const: 'remove' }, id }, ['op', 'id']),
   { ...objectSchema({ op: { const: 'reorder' }, id, layer: integer(-1000, 1000), position: integer(0, 511) }, ['op', 'id']), anyOf: [{ required: ['layer'] }, { required: ['position'] }] },
 ] };

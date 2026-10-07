@@ -31,13 +31,14 @@ export async function runWorkflow(options: WorkflowOptions): Promise<WorkflowRes
   for (const [index, stage] of workflow.stages.entries()) {
     options.signal?.throwIfAborted();
     const final = index === workflow.stages.length - 1;
+    const singleArtist = workflow.stages.length === 1;
     await options.onEvent?.({ type: 'stage', stage, index: index + 1, total: workflow.stages.length + Number(workflow.review) });
     const result = await runAgentLoop({
       prompt: options.prompt, scene_id: options.scene_id, initial_scene: scene, tools: options.createTools(),
       config: { ...config, editor_model: profiles[stage.role]?.model || defaultModel, reviewer_model: reviewer },
       reviewer_instructions: profiles.reviewer?.instructions, fetch: options.fetch, signal: options.signal,
       review: workflow.review,
-      stage: { final, instructions: workflow.stages.length === 1 ? `${EDITOR_INSTRUCTIONS}\nInclude done (completed work) and not_done ({item, reason}) in finish_draft.${profiles[stage.role]?.instructions ? `\n${profiles[stage.role]!.instructions}` : ''}` : stageInstructions(stage, final, profiles[stage.role]?.instructions, workflow.review), context: workflow.stages.length === 1 ? { final: true } : {
+      stage: { final, handoff: !singleArtist, instructions: singleArtist ? `${EDITOR_INSTRUCTIONS}${profiles[stage.role]?.instructions ? `\n${profiles[stage.role]!.instructions}` : ''}` : stageInstructions(stage, final, profiles[stage.role]?.instructions, workflow.review), context: singleArtist ? { final: true } : {
         stage_index: index + 1, role: stage.role, responsibility: stage.responsibility, final, review_enabled: workflow.review,
         plan: workflow.stages, history: structuredClone(history), previous: history.at(-1) ?? null,
       } },

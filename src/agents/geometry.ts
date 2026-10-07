@@ -15,10 +15,23 @@ function cornerBounds(value: unknown, inclusive = false): Bounds | undefined {
 
 function normalizeObject(object: Record<string, unknown>, existing?: SceneObject): void {
   const kind = object.kind ?? existing?.kind;
+  if (object.stroke !== undefined) {
+    if (kind === 'line') object.color ??= object.stroke;
+    else object.outline ??= object.stroke;
+    delete object.stroke;
+  }
+  if (object.fill !== undefined) {
+    // Core objects store an ordinary solid fill as `color`; `fill` is reserved
+    // for the renderer's extra modes (transparent and dithered fills).
+    if (object.fill === 'none' || (object.fill && typeof object.fill === 'object')) {
+      // Keep the richer fill value in the core schema.
+    } else {
+      object.color ??= object.fill;
+      delete object.fill;
+    }
+  }
   const rectangle = kind === 'rect' || kind === 'rectangle' || (kind === 'polygon' && object.points === undefined && (object.rect !== undefined || object.bounds !== undefined || object.height !== undefined));
   const bounded = rectangle || ['circle', 'ellipse', 'procedural', 'sprite'].includes(String(kind));
-  if (object.color === undefined && object.fill !== undefined) object.color = object.fill;
-  delete object.fill;
   if (bounded) {
     let bounds = object.bounds;
     if (bounds === undefined && object.rect !== undefined) bounds = object.rect;

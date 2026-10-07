@@ -21,13 +21,14 @@ test('CLI uses shared local configuration, selected stages and writes reviewed a
   if (!address || typeof address === 'string') throw new Error('Missing test server address');
   try {
     const output = resolve(directory, 'artifacts');
-    const result = await promisify(execFile)(process.execPath, ['--import', 'tsx', 'scripts/agent.ts', '--layers', '4', 'Scene [reject]'], {
+    const result = await promisify(execFile)(process.execPath, ['--import', 'tsx', 'scripts/agent.ts', '--model', 'selected-model', '--image-divisor', '2', '--reasoning-effort', 'low', '--layers', '4', 'Scene [reject]'], {
       env: { ...process.env, ARTBOARD_CONFIG_FILE: resolve(directory, 'agents.local.json'), AGENT_OUTPUT_DIR: output,
-        AGENT_BASE_URL: `http://127.0.0.1:${address.port}`, AGENT_EDITOR_MODEL: 'test-model', AGENT_REVIEWER_MODEL: 'reviewer-model', AGENT_MAX_REVIEWS: '2', AGENT_VISION: 'true', AGENT_SCENE: '' },
+        AGENT_BASE_URL: `http://127.0.0.1:${address.port}`, AGENT_EDITOR_MODEL: 'configured-editor', AGENT_REVIEWER_MODEL: 'configured-reviewer', AGENT_MAX_REVIEWS: '2', AGENT_VISION: 'false', AGENT_SCENE: '' },
       timeout: 15000,
     });
     assert.match(result.stdout, /Stage 3\/4: Decorator/);
     assert.match(result.stdout, /Approved final/);
+    assert.match(await readFile(resolve(output, 'logs', 'agent.jsonl'), 'utf8'), /"model":"selected-model"/);
     const [runId] = await readdir(resolve(output, 'workflow'));
     const runFolder = resolve(output, 'workflow', runId);
     const workflow = JSON.parse(await readFile(resolve(runFolder, 'workflow.json'), 'utf8'));
@@ -39,5 +40,6 @@ test('CLI uses shared local configuration, selected stages and writes reviewed a
     assert.match(await readFile(resolve(output, 'logs', 'agent.jsonl'), 'utf8'), /"type":"saved"/);
     const config = JSON.parse(await readFile(resolve(directory, 'agents.local.json'), 'utf8'));
     assert.deepEqual(config.connection, {});
+    assert.notEqual(config.agents.artist.model, 'selected-model', 'CLI model selection does not persist to local configuration');
   } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); }
 });

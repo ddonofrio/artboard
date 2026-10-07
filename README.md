@@ -75,6 +75,14 @@ npm run draw-script -- scripts/drawings/fighter-reference.mjs outputs/fighter-re
 
 The reference study preserves a first attempt and a separate revision after visual review. Both use the existing primitives and fixed palette. See [drawing scripts](scripts/README.md) for the callable tools and execution contract.
 
+Run a model-driven drawing through the same configured workflow used by the browser:
+
+```sh
+npm run agent -- --model ornith --layers 1 --image-divisor 4 "A house"
+```
+
+The CLI reads its connection from the local app configuration or environment. `--model` selects that model for every workflow role for this run only; it does not rewrite local settings. The prompt is required. Optional flags include `--reasoning-effort none|low|medium|high`. Results and previews are written under `outputs/`.
+
 ## Structure
 
 ```text

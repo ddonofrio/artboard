@@ -24,4 +24,6 @@ Tool failures must be actionable: identify the tool, the failed operation/field 
 
 Run typecheck, non-mutating lint, and relevant tests. Build for browser or package integration changes. Verify behavior without a visual review. Do not stage, commit, push, or deploy without an explicit request.
 
+When asked to iteratively improve a model-generated drawing, follow [the model-drawing iteration guide](src/agents/iteration.md). Preserve the first-shot artifact, diagnose observed tool/model failures, and keep changes generic so they do not teach the test subject.
+
 Package manifests and the lockfile own dependency versions and commands. TypeScript and schemas own API shape. Tests own executable invariants. Keep documentation about current responsibilities and behavior; do not add change histories or speculative designs.

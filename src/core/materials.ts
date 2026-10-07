@@ -1,6 +1,5 @@
 import { materials, withDefaults } from './catalog.js';
 import type { Material } from './types.js';
-
 export function hash(seed: number, x: number, y = 0): number {
   let n = (seed ^ Math.imul(x | 0, 374761393) ^ Math.imul(y | 0, 668265263)) >>> 0;
   n = Math.imul(n ^ (n >>> 13), 1274126177);

@@ -21,6 +21,16 @@ Core validation remains authoritative: one fixed 16-color palette, up to 512 sce
 
 This command executes trusted local modules with ordinary Node.js permissions. It is not a JavaScript sandbox or an inline model tool. Autonomous editor/reviewer responses still contain validated drawing data and never execute generated JavaScript. Script execution is an explicit local CLI action.
 
+## Model-driven CLI
+
+`npm run agent -- [options] <prompt>` runs the same editor workflow used by the browser and saves its artifacts under `outputs/`.
+
+```sh
+npm run agent -- --model ornith --layers 1 --image-divisor 4 "A house"
+```
+
+The endpoint and optional API key come from the app's local configuration or environment. `--model` temporarily selects the same model for editor and reviewer roles; it does not change that configuration. Supported options are `--layers 1-7`, `--model ID`, `--image-divisor 1-64`, and `--reasoning-effort none|low|medium|high`. The prompt is required. This command does not discover models independently; it uses the configured connection.
+
 ## Fighter reference study
 
 ```sh

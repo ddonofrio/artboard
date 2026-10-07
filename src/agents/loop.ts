@@ -7,7 +7,7 @@ import { agentTools, toolUsage, type DraftSubmission, type Handoff, type Review 
 import { drawingFeedback } from './feedback.js';
 import { LoopDetector, type LoopDetection } from './plugins/loop-detector.js';
 import { modelStream } from './stream.js';
-import { namedColors } from './colors.js';
+import { drawingScene, namedColors } from './colors.js';
 
 export interface AgentDraft { scene: Scene; preview: { image_ref: string; revision: number } }
 type DrawingAgent = Omit<Parameters<typeof streamText<ToolSet>>[0], 'messages' | 'prompt'>;
@@ -48,7 +48,7 @@ export interface AgentRunOptions {
   scene_id?: string;
   initial_scene?: Scene;
   /** Isolated workflow stage; the original editor/reviewer loop remains the default. */
-  stage?: { instructions: string; context: Record<string, unknown>; final: boolean };
+  stage?: { instructions: string; context: Record<string, unknown>; final: boolean; handoff?: boolean };
   reviewer_instructions?: string;
   review?: boolean;
   fetch?: typeof fetch;
@@ -306,7 +306,7 @@ export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunRe
       if (config.vision && edits > 0 && lastViewedRevision !== revision) return `Revision ${revision} has edits the model has not visually checked. Call scene_render alone, inspect the image in the next response, and submit that unchanged revision.`;
       if (revision !== preparedRevision) return 'The drawing changed within this response. Check its updated JSON in the next model request, or call scene_render for visual inspection, before calling finish_draft alone. Complete every requested element before submitting.';
       if (pendingReview && (revision === pendingReview.revision || !correctionApplied)) return `The reviewer rejected revision ${pendingReview.revision}. Apply visible corrections with scene_apply before calling finish_draft. Pending corrections: ${JSON.stringify(pendingReview.issues)}`;
-    }, !!options.stage, toolStarted('editor'), config.vision, options.review !== false);
+    }, !!options.stage?.handoff, toolStarted('editor'), config.vision, options.review !== false);
     const editor: DrawingAgent = {
       model: provider.chatModel(editorModel), instructions: editorBase,
       tools: editorTools, toolChoice: 'required', maxRetries: 0, maxOutputTokens: config.max_output_tokens,
@@ -324,7 +324,7 @@ export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunRe
         }
         const previews = requestedImages.editor.splice(0);
         if (previews.length) lastViewedRevision = previews.at(-1)!.revision;
-        const context = JSON.stringify(namedColors({ ...JSON.parse(text), current_scene: current, image_attached: previews.length > 0 }));
+        const context = JSON.stringify(namedColors({ ...JSON.parse(text), current_scene: drawingScene(current), image_attached: previews.length > 0 }));
         const currentMessage = phaseMessages(context, previews, imageAssessmentPrompt(options.prompt, 'editor'))[0];
         // Append new state instead of rewriting the cached conversation prefix.
         const updatedMessages = recovery ? [...contextMessages.slice(0, -1), currentMessage] : contextMessages.some(message => message.role === 'assistant' || message.role === 'tool') || previews.length ? [...contextMessages, currentMessage] : contextMessages;
@@ -337,7 +337,7 @@ export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunRe
       },
       onStepFinish: reportStep('editor', round, editorModel),
     };
-    let text = drawingRequest(options.prompt, { scene_id: sceneId, round, review: pendingReview ?? null, current_scene: host.store.get(sceneId), image_attached: false, vision_available: config.vision, ...(options.stage ? { workflow: options.stage.context } : {}) });
+    let text = drawingRequest(options.prompt, { scene_id: sceneId, round, review: pendingReview ?? null, current_scene: drawingScene(host.store.get(sceneId)), image_attached: false, vision_available: config.vision, ...(options.stage ? { workflow: options.stage.context } : {}) });
     while (!submission) {
       try {
         await consume(editor, phaseMessages(text));
@@ -356,7 +356,7 @@ export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunRe
           scene_id: sceneId,
           round,
           review: pendingReview ?? null,
-          current_scene: scene,
+          current_scene: drawingScene(scene),
           image_attached: false,
           vision_available: config.vision,
           continuation: 'A previous fresh response exhausted its output tokens before calling a tool. Continue the original user request from the current canvas shown here. Preserve completed work, do not repeat successful edits, identify what remains, and take the next concrete action. If the request is complete, call finish_draft with the current revision.',
@@ -368,7 +368,7 @@ export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunRe
     if (!submission) return incomplete(new Error(phaseFailure('Editor', 'finish_draft')), true);
     const scene = host.store.get(sceneId);
     if (submission.revision !== scene.revision) return incomplete(new Error('Editor changed the scene after submitting it. The current canvas is delivered without review.'));
-    if (options.stage) handoff = { done: submission.done!, not_done: submission.not_done! };
+    if (options.stage?.handoff) handoff = { done: submission.done!, not_done: submission.not_done! };
     const preview = requireResult<AgentDraft['preview']>(await host.scene_render({ scene_id: sceneId }));
     draft = { scene, preview };
     drafts.push(structuredClone(draft));
@@ -385,7 +385,7 @@ export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunRe
     phaseSteps = 0; edits = 0; rejectedTools = 0; lastToolError = '';
     emit({ type: 'phase', role: 'reviewer', round });
     reviewState.value = undefined;
-    reviewerMessages.push(...phaseMessages(drawingRequest(options.prompt, { scene_id: sceneId, round, previous_review: pendingReview ?? null, draft: { scene: draft.scene }, image_attached: false, vision_available: config.vision, ...(handoff ? { final_handoff: handoff } : {}) })));
+    reviewerMessages.push(...phaseMessages(drawingRequest(options.prompt, { scene_id: sceneId, round, previous_review: pendingReview ?? null, draft: { scene: drawingScene(draft.scene) }, image_attached: false, vision_available: config.vision, ...(handoff ? { final_handoff: handoff } : {}) })));
     try {
       const response = await consume(reviewer, reviewerMessages);
       // Persist the actual prepared context so a recovery stays effective in

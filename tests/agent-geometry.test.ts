@@ -60,6 +60,25 @@ test('rectangles, Pillow corner boxes and ordinary polygons coexist in one atomi
   assert.equal(host.store.get('drawing').objects.length, 0, 'All figures share one undo entry');
 });
 
+test('the model-facing fill and stroke names normalize for polygon, line, and updates', async () => {
+  const { host, apply } = setup();
+  assert.equal((await apply([
+    { op: 'add', object: { id: 'wall', kind: 'rect', x: 10, y: 10, width: 30, height: 25, fill: 'red', stroke: 'black' } },
+    { op: 'add', object: { id: 'shade', kind: 'polygon', points: [[10,10],[20,10],[15,20]], fill: { colors: ['dark blue', 'blue'], ratio: 0.5 } } },
+    { op: 'add', object: { id: 'edge', kind: 'line', points: [[0,0],[20,20]], stroke: 'dark red', stroke_width: 2 } },
+  ])).ok, true);
+  const [wall, shade, edge] = host.store.get('drawing').objects;
+  assert.equal(wall.kind, 'polygon');
+  assert.equal(wall.color, 12); assert.equal(wall.outline, 0);
+  assert.equal(shade.kind, 'polygon');
+  if (shade.kind === 'polygon') assert.deepEqual(shade.fill, { colors: [1, 9], ratio: 0.5 });
+  assert.equal(edge.kind, 'line'); assert.equal(edge.color, 4); assert.equal(edge.stroke_width, 2);
+
+  assert.equal((await apply([{ op: 'update', id: 'wall', changes: { fill: 'yellow', stroke: 'blue' } }])).ok, true);
+  const updated = host.store.get('drawing').objects[0];
+  assert.equal(updated.color, 14); assert.equal(updated.outline, 9);
+});
+
 test('canonical bounds win, and updates use the latest object geometry within the batch', async () => {
   const { host, apply } = setup();
   assert.equal((await apply([

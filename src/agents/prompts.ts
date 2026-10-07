@@ -1,23 +1,21 @@
 import { DRAWING_CYCLE } from './drawing-cycle.js';
 import { namedColors } from './colors.js';
 
-export const EDITOR_INSTRUCTIONS = `Complete the user's drawing request.
+export const EDITOR_INSTRUCTIONS = `Draw what the user requested. Use only the exposed shapes and colors.
 ${DRAWING_CYCLE}`;
 
-export const REVIEWER_INSTRUCTIONS = `Compare the submitted drawing with the user's request.
+export const REVIEWER_INSTRUCTIONS = `Compare the drawing with the user's request.
 Use its image when supplied, otherwise use its scene data. Request a closer look only when needed.
-Check required elements, placement, overlap and geometry. Respect the requested style.
-Approve when the request is satisfied. Otherwise return up to three concrete defects with the smallest edits that fix them.
-On subsequent reviews, check the previous corrections and retain only unresolved defects.
-Call submit_review with the submitted revision, approved, and issues. Use existing object IDs, or scene for missing elements.`;
+Check the requested elements, placement, overlap, and style. Approve when complete; otherwise report up to three specific fixes.
+Call submit_review. Use existing object IDs, or scene for a missing element.`;
 
 /** Pair each vision input with the original request and an explicit completion check. */
 export function imageAssessmentPrompt(prompt: string, role: 'editor' | 'reviewer'): string {
   const image = role === 'editor' ? 'what you have drawn' : 'the submitted drawing';
   const nextAction = role === 'editor'
-    ? 'If the list is empty, you may finish by calling finish_draft. Otherwise, fix every listed item, call scene_render again, and repeat this check before finishing.'
-    : 'If the list is empty, approve by calling submit_review with no issues. Otherwise, call submit_review with approval false and actionable issues for the missing or incorrect items.';
-  return `The attached image is ${image}. This is what the user asked to be drawn: ${JSON.stringify(prompt)}. Determine which requested elements are correct and which are missing or incorrect. Make a concrete list of every missing or incorrect item before choosing your next action. ${nextAction}`;
+    ? 'Make at most one focused edit using existing object IDs where possible. Render once more only if you changed the drawing; otherwise call finish_draft now.'
+    : 'Call submit_review now: approve if the request is met, or return at most three concrete corrections.';
+  return `The attached image is ${image}. User request: ${JSON.stringify(prompt)}. Compare the image with the request, briefly identify the most important visible mismatch, then act. ${nextAction}`;
 }
 
 /** Keep the drawing request explicit and separate from execution data. */

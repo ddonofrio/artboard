@@ -10,7 +10,7 @@ export const BASIC_PALETTE = {
     '#555555', '#5555FF', '#55FF55', '#55FFFF', '#FF5555', '#FF55FF', '#FFFF55', '#FFFFFF'],
 };
 
-export const COLOR_FIELDS = new Set(['color', 'fill', 'outline', 'foreground', 'background', 'darkness', 'metal_color', 'highlight_color']);
+export const COLOR_FIELDS = new Set(['color', 'fill', 'stroke', 'outline', 'foreground', 'background', 'darkness', 'metal_color', 'highlight_color']);
 
 export function colorIndex(value: unknown): unknown {
   if (typeof value !== 'string') return value;

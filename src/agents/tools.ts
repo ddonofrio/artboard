@@ -1,8 +1,8 @@
 import Ajv from 'ajv';
 import { jsonSchema, tool, type ToolSet } from 'ai';
-import { COLOR_NAMES, generators, materials, number, objectSchema, pointSchema, sceneObjectSchema, toolSchemas, type SceneTools, type ToolResult } from '../core/index.js';
+import { COLOR_NAMES, number, objectSchema, pointSchema, toolSchemas, type Schema, type SceneTools, type ToolResult } from '../core/index.js';
 import { normalizeGeometry } from './geometry.js';
-import { namedCatalog, namedColors, namedColorSchema } from './colors.js';
+import { namedColors, namedColorSchema } from './colors.js';
 
 export interface Handoff { done: string[]; not_done: { item: string; reason: string }[] }
 export interface DraftSubmission { revision: number; done?: Handoff['done']; not_done?: Handoff['not_done'] }
@@ -17,48 +17,33 @@ const validateDraft = ajv.compile(draftSubmissionSchema), validateReview = ajv.c
 const validateStage = ajv.compile(stageSubmissionSchema);
 const error = (message: string): ToolResult => ({ ok: false, error: { code: 'AGENT_VALIDATION', message } });
 
-// Describe nesting and geometry without repeating every generator/material
-// parameter schema in every operation. The host validates their exact contracts.
-const objectVariants = sceneObjectSchema.oneOf as { properties: Record<string, Record<string, unknown>> }[];
-const drawingProperties = {
-  ...objectVariants[0].properties,
-  color: { ...namedColorSchema, description: 'Interior fill color for shapes; stroke color for lines.' },
-  outline: { ...namedColorSchema, description: 'Draw a continuous border around the entire rectangle, polygon, ellipse or star in this color, in addition to its interior fill.' },
-  stroke_width: { ...objectVariants[0].properties.stroke_width, description: 'Line or outline thickness in pixels; defaults to 1.' },
-  kind: { type: 'string', enum: ['circle', 'rect', 'rectangle', 'polygon', 'ellipse', 'star', 'line', 'procedural', 'sprite'] },
-  points: { anyOf: [objectVariants[1].properties.points, objectVariants[2].properties.bounds], description: 'Polygon/line vertices. For ellipse, procedural or sprite, also accepts bounding corners or [x,y,width,height].' },
-  bounds: { ...objectVariants[2].properties.bounds, description: '[x,y,width,height], measured from the top-left of the canvas.' },
-  center: { ...pointSchema, description: 'Circle/ellipse/star center [x,y], in canvas pixels.' },
-  radius: { ...number(0.5, 2048), description: 'Circle radius or star outer radius in pixels.' },
-  tips: { ...objectVariants[4].properties.tips, description: 'Star tip count; defaults to 5, as on the USA flag.' },
-  inner_radius: { ...objectVariants[4].properties.inner_radius, description: 'Star notch radius in pixels, smaller than radius; defaults to about 0.382 times radius.' },
-  rotation: { ...objectVariants[4].properties.rotation, description: 'Star clockwise rotation in degrees; 0 (default) puts a tip straight up.' },
-  rect: { ...objectVariants[2].properties.bounds, description: 'Rectangle/ellipse [x,y,width,height]. Width and height are dimensions in pixels.' },
-  xy: { anyOf: [objectVariants[1].properties.points, { type: 'array', items: number(-4096, 4096), minItems: 4, maxItems: 4 }], description: 'Pillow-style corners for ellipse/rectangle (inclusive endpoints), or polygon/line vertices.' },
-  bbox: { anyOf: [objectVariants[1].properties.points, { type: 'array', items: number(-4096, 4096), minItems: 4, maxItems: 4 }], description: 'Bounding corners [x0,y0,x1,y1] or [[x0,y0],[x1,y1]], with exclusive far edges.' },
-  x: number(-4096, 4096), y: number(-4096, 4096), width: number(0, 4096), height: number(0.5, 4096),
-  cx: number(-4096, 4096), cy: number(-4096, 4096), r: number(0.5, 2048), rx: number(0.5, 2048), ry: number(0.5, 2048),
-  start: pointSchema, end: pointSchema,
-  fill: { ...namedColorSchema, description: 'Fill color name; alias for color.' },
-  generator: { type: 'string', enum: Object.keys(generators) },
-  asset: objectVariants[3].properties.asset,
-  params: { type: 'object', additionalProperties: true, description: 'Generator parameters from scene_catalog category=objects and id=generator.' },
-  material: objectSchema({ id: { type: 'string', enum: Object.keys(materials) }, params: { type: 'object', additionalProperties: true } }, ['id']),
-};
-const drawingSchema = objectSchema(drawingProperties, ['id', 'kind']);
-drawingSchema.description = 'Circle: center and radius. Star: center and radius, with 5 tips by default; example: {"id":"star1","kind":"star","center":[50,50],"radius":10,"fill":"white"}. Rectangle: rect or x,y,width,height. Ellipse: bounds or xy. Polygon/line: points. For a frame, use the full shape dimensions with outline and stroke_width. Example: {"id":"frame","kind":"rect","rect":[100,100,440,290],"fill":"light gray","outline":"dark gray","stroke_width":2}. Coordinates start at the top-left; colors use the fixed English names; layer defaults to 0, higher layers paint on top.';
-const operationsSchema = structuredClone((toolSchemas.scene_apply.inputSchema.properties as Record<string, Record<string, unknown>>).operations);
-const operationVariants = (operationsSchema.items as { oneOf: { properties: Record<string, unknown> }[] }).oneOf;
-operationVariants[0].properties.object = drawingSchema;
-const changesProperties = { ...drawingProperties } as Record<string, Record<string, unknown>>;
-for (const field of ['id', 'kind', 'generator', 'asset']) delete changesProperties[field];
-operationVariants[1].properties.changes = { ...objectSchema(changesProperties), minProperties: 1 };
+const stroke = { ...namedColorSchema, description: 'Border or line color.' };
+const fill = { anyOf: [namedColorSchema, { const: 'none' }, objectSchema({ colors: { type: 'array', items: namedColorSchema, minItems: 2, maxItems: 2 }, ratio: number(0, 1) }, ['colors', 'ratio'])], description: 'A color, none, or {colors:[color1,color2],ratio:0.25} to blend two colors.' };
+const pointList = { type: 'array', items: pointSchema, minItems: 2, maxItems: 256, description: 'Points are [x,y] canvas coordinates.' };
+const common = { id: { type: 'string', pattern: '^[a-zA-Z][a-zA-Z0-9_-]{0,63}$' }, fill, stroke, stroke_width: number(1, 24), rotation: number(-360, 360) };
+const drawingVariants = [
+  objectSchema({ ...common, kind: { const: 'rect' }, x: number(-4096,4096), y: number(-4096,4096), width: number(1,4096), height: number(1,4096) }, ['id','kind','x','y','width','height']),
+  objectSchema({ ...common, kind: { const: 'circle' }, cx: number(-4096,4096), cy: number(-4096,4096), radius: number(0.5,2048) }, ['id','kind','cx','cy','radius']),
+  objectSchema({ ...common, kind: { const: 'ellipse' }, cx: number(-4096,4096), cy: number(-4096,4096), rx: number(0.5,2048), ry: number(0.5,2048) }, ['id','kind','cx','cy','rx','ry']),
+  objectSchema({ ...common, kind: { const: 'polygon' }, points: { ...pointList, minItems: 3 } }, ['id','kind','points']),
+  objectSchema({ id: common.id, kind: { const: 'line' }, stroke, stroke_width: common.stroke_width, rotation: common.rotation, points: pointList }, ['id','kind','points']),
+];
+const drawingSchema = { oneOf: drawingVariants, description: 'Shapes: rect uses x,y,width,height; circle uses cx,cy,radius; ellipse uses cx,cy,rx,ry; polygon and line use points:[[x,y],...]. New shapes paint over earlier shapes. Colors are English names. Use fill for the inside, stroke for the border, and rotation in degrees.' };
+const drawingProperties = Object.assign({}, ...drawingVariants.map(variant => variant.properties as Record<string, unknown>));
+const changesProperties = { ...drawingProperties } as Record<string, Schema>;
+for (const field of ['id', 'kind']) delete changesProperties[field];
+const operation = { oneOf: [
+  objectSchema({ op: { const: 'add' }, object: drawingSchema }, ['op','object']),
+  objectSchema({ op: { const: 'update' }, id: common.id, changes: objectSchema(changesProperties) }, ['op','id','changes']),
+  objectSchema({ op: { const: 'remove' }, id: common.id }, ['op','id']),
+] };
+const operationsSchema = { type: 'array', minItems: 1, maxItems: 128, items: operation };
 
 export function toolUsage(name: string): string {
   const usage: Record<string, string> = {
     scene_catalog: 'Use category=palettes/materials/objects/assets and optionally id for one entry.',
     scene_inspect: 'Use the supplied scene_id; omit ids for a summary or pass existing object IDs in ids.',
-    scene_apply: `Use operations=[{op:"add",object:{id,kind,...}},{op:"update",id,changes:{...}}]. Circle/star: center:[x,y],radius; stars default to 5 tips, optional inner_radius must be smaller than radius and rotation is clockwise degrees. Ellipse: bounds:[x,y,width,height] or points with bounding corners; rectangle: kind:"rect",rect:[x,y,width,height]; polygon: points with at least 3 [x,y] vertices; line: at least 2. Frames use the full shape dimensions with fill, outline and stroke_width in pixels. Coordinates start at the top-left. Colors: ${COLOR_NAMES.join(', ')}. The failed batch was not applied.`,
+    scene_apply: `Use {operations:[{op:"add",object:{id,kind,...}}]}. rect={x,y,width,height}; circle={cx,cy,radius}; ellipse={cx,cy,rx,ry}; polygon/line={points:[[x,y],...]}. Use fill for the inside and stroke for the border. Colors: ${COLOR_NAMES.join(', ')}. The failed batch was not applied.`,
     scene_render: 'Call alone with the supplied scene_id; optional crop=[x,y,width,height] must fit the canvas and scale is an integer 1-4.',
     scene_history: 'Use action="undo" or "redo" and steps=1..64, no more than the available history.',
     scene_io: 'The 16 colors are fixed. Choose an English color name in scene_apply.',
@@ -97,14 +82,15 @@ export function agentTools(host: SceneTools, sceneId: string, role: 'editor' | '
     pending = next.catch(() => {});
     return next;
   };
-  const names = (role === 'editor' ? ['scene_catalog', 'scene_inspect', 'scene_apply', 'scene_render', 'scene_history'] : ['scene_catalog', 'scene_inspect', 'scene_render']).filter(name => vision || name !== 'scene_render');
+  const names = [...(role === 'editor' ? ['scene_apply'] : []), ...(vision ? ['scene_render'] : [])];
   for (const name of names) {
     const original = toolSchemas[name];
     // The full polymorphic object schema is large. Discovery supplies precise
     // object contracts; the existing dispatcher still validates the full schema.
     const schema = structuredClone(original.inputSchema);
     if ('scene_id' in (schema.properties as Record<string, unknown>)) (schema.properties as Record<string, unknown>).scene_id = { type: 'string', const: sceneId };
-    if (name === 'scene_catalog') (schema.properties as Record<string, unknown>).category = { type: 'string', enum: ['palettes', 'materials', 'objects', 'assets', 'tools'] };
+    schema.additionalProperties = false;
+    for (const key of Object.keys((schema.properties as Record<string, unknown>))) if (key !== 'scene_id') delete (schema.properties as Record<string, unknown>)[key];
     if (name === 'scene_apply') (schema.properties as Record<string, unknown>).operations = structuredClone(operationsSchema);
     result[name] = tool({
       description: name === 'scene_render' ? 'Request an image for the next model response. Call alone. Supports crop and scale.' : original.description,
@@ -117,11 +103,6 @@ export function agentTools(host: SceneTools, sceneId: string, role: 'editor' | '
         let appliedInput: Record<string, unknown> | undefined;
         if (typeof args.scene_id === 'string' && /<\/?(?:parameter|function|tool_call)\b/.test(args.scene_id)) output = error(`Malformed tool arguments: XML tool tags are embedded in scene_id. Use one API function call with valid JSON arguments; scene_id must be exactly "${sceneId}". Do not place tool markup or another call inside a string.`);
         else if (args.scene_id !== undefined && args.scene_id !== sceneId) output = error(`Only scene_id ${sceneId} is available in this run. Retry ${name} with scene_id exactly "${sceneId}"; do not create or reference another scene ID.`);
-        else if (name === 'scene_catalog' && args.category === 'recipes') output = error('Prebuilt scenes are unavailable to agents. Compose objects with scene_apply instead.');
-        else if (name === 'scene_catalog' && args.category === 'palettes') output = args.id && args.id !== 'basic'
-          ? error('There is only one fixed set of 16 colors. Use category=palettes without an ID, or id=basic.')
-          : { ok: true, result: { colors: [...COLOR_NAMES] } };
-        else if (name === 'scene_catalog' && (!args.category || args.category === 'tools')) output = { ok: true, result: { message: 'The 16 English color names are fixed. Query category=materials, objects, or assets and a single ID for details. Primitive kinds: circle, rect, polygon, ellipse, star, line; procedural kinds use the objects catalog.', categories: ['palettes', 'materials', 'objects', 'assets'] } };
         else if (name === 'scene_apply' && misplacedObjectField(args)) output = error(misplacedObjectField(args)!);
         else {
           appliedInput = name === 'scene_apply' ? normalizeGeometry(args, host) : args;
@@ -137,7 +118,7 @@ export function agentTools(host: SceneTools, sceneId: string, role: 'editor' | '
         // Only an explicit render requests vision. Keep bytes out of prose;
         // orchestration attaches this exact render once as a real image part.
         if (name === 'scene_render' && output.ok) output = { ok: true, result: { ...output.result, image_ref: 'Requested image supplied once in the next model request. Call scene_render again for another look.' } };
-        return (name === 'scene_catalog' ? namedCatalog(output) : namedColors(output)) as ToolResult;
+        return namedColors(output) as ToolResult;
       }),
     });
   }
