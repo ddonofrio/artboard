@@ -2,7 +2,7 @@ import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { streamText, ToolChoiceViolationError, type ModelMessage, type StepResult, type ToolSet } from 'ai';
 import { BASIC_PALETTE, requireResult, type PixelImage, type Scene, type SceneTools, type ToolResult } from '../core/index.js';
 import { agentConfig, listModels, type AgentConfig } from './config.js';
-import { drawingRequest, EDITOR_INSTRUCTIONS, REVIEWER_INSTRUCTIONS } from './prompts.js';
+import { drawingRequest, EDITOR_INSTRUCTIONS, imageAssessmentPrompt, REVIEWER_INSTRUCTIONS } from './prompts.js';
 import { agentTools, toolUsage, type DraftSubmission, type Handoff, type Review } from './tools.js';
 import { drawingFeedback } from './feedback.js';
 import { LoopDetector, type LoopDetection } from './plugins/loop-detector.js';
@@ -56,9 +56,9 @@ export interface AgentRunOptions {
   onEvent?: ((event: AgentEvent) => void) | ((event: AgentEvent) => Promise<void>);
 }
 
-function phaseMessages(text: string, previews: AgentDraft['preview'][] = []): ModelMessage[] {
+function phaseMessages(text: string, previews: AgentDraft['preview'][] = [], assessment?: string): ModelMessage[] {
   if (!previews.length) return [{ role: 'user', content: text }];
-  return [{ role: 'user', content: [{ type: 'text', text }, ...previews.map(preview => {
+  return [{ role: 'user', content: [{ type: 'text', text }, ...(assessment ? [{ type: 'text' as const, text: assessment }] : []), ...previews.map(preview => {
     const format = /^data:(image\/(?:jpeg|png));base64,/.exec(preview.image_ref);
     if (!format) throw new Error('Vision requires a preview adapter that returns inline JPEG or PNG data URLs.');
     return { type: 'file' as const, data: new URL(preview.image_ref), mediaType: format[1] };
@@ -68,7 +68,8 @@ function phaseMessages(text: string, previews: AgentDraft['preview'][] = []): Mo
 function withoutImages(messages: ModelMessage[]): ModelMessage[] {
   return messages.map(message => {
     if (message.role !== 'user' || !Array.isArray(message.content)) return message;
-    const text = message.content.filter(part => part.type === 'text').map(part => part.text).join('\n');
+    const text = message.content.find(part => part.type === 'text')?.text;
+    if (!text) throw new Error('An image-bearing model message is missing its JSON drawing context.');
     const context = JSON.parse(text) as Record<string, unknown>;
     return { role: 'user', content: JSON.stringify({ ...context, image_attached: false }) };
   });
@@ -280,7 +281,7 @@ export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunRe
       const userIndex = updatedMessages.map(message => message.role).lastIndexOf('user');
       if (userIndex >= 0) {
         const context = JSON.parse(updatedMessages[userIndex].content as string);
-        updatedMessages[userIndex] = phaseMessages(JSON.stringify({ ...context, image_attached: previews.length > 0 }), previews)[0];
+        updatedMessages[userIndex] = phaseMessages(JSON.stringify({ ...context, image_attached: previews.length > 0 }), previews, imageAssessmentPrompt(options.prompt, 'reviewer'))[0];
       }
       return { instructions: recovery?.instructions ?? reviewerInstructions, messages: updatedMessages };
     },
@@ -324,7 +325,7 @@ export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunRe
         const previews = requestedImages.editor.splice(0);
         if (previews.length) lastViewedRevision = previews.at(-1)!.revision;
         const context = JSON.stringify(namedColors({ ...JSON.parse(text), current_scene: current, image_attached: previews.length > 0 }));
-        const currentMessage = phaseMessages(context, previews)[0];
+        const currentMessage = phaseMessages(context, previews, imageAssessmentPrompt(options.prompt, 'editor'))[0];
         // Append new state instead of rewriting the cached conversation prefix.
         const updatedMessages = recovery ? [...contextMessages.slice(0, -1), currentMessage] : contextMessages.some(message => message.role === 'assistant' || message.role === 'tool') || previews.length ? [...contextMessages, currentMessage] : contextMessages;
         preparedRevision = current.revision;

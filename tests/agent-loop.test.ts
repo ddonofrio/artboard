@@ -172,6 +172,38 @@ test('SDK errors before dispatch appear in the log and leave the canvas empty un
   assert.equal(events.filter(event => event.type === 'preview')[0].scene.objects.length, 0);
 });
 
+test('scene_render pairs the image with the original request and a missing-items assessment', async () => {
+  const requests: ChatRequest[] = [];
+  const prompt = 'A green tower under a yellow moon';
+  const fetcher: typeof fetch = async (_input, init) => {
+    const request = JSON.parse(String(init?.body)) as ChatRequest;
+    requests.push(request);
+    const calls = [
+      { name: 'scene_apply', args: { scene_id: 'artboard', operations: [{ op: 'add', object: { id: 'tower', kind: 'rect', rect: [280, 160, 80, 240], color: 'green' } }] } },
+      { name: 'scene_render', args: { scene_id: 'artboard' } },
+      { name: 'finish_draft', args: { revision: 1 } },
+    ];
+    const call = calls[requests.length - 1];
+    return Response.json({ id: `assessment-${requests.length}`, object: 'chat.completion', created: 1, model: 'vl', choices: [{ index: 0, finish_reason: 'tool_calls', message: { role: 'assistant', content: null,
+      tool_calls: [{ id: `assessment-call-${requests.length}`, type: 'function', function: { name: call.name, arguments: JSON.stringify(call.args) } }],
+    } }] });
+  };
+  const result = await runAgentLoop({ tools: host(), prompt, config: { editor_model: 'vl' }, review: false, fetch: fetcher });
+  assert.equal(result.stop_reason, 'unreviewed');
+  assert.equal(requests.length, 3);
+  const content = requests[2].messages.filter(message => message.role === 'user').at(-1)!.content;
+  assert.ok(Array.isArray(content));
+  const texts = content.filter(part => part.type === 'text').map(part => part.text!);
+  assert.equal(texts.length, 2);
+  assert.equal(JSON.parse(texts[0]).prompt, prompt);
+  assert.match(texts[1], new RegExp(JSON.stringify(prompt).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.match(texts[1], /which requested elements are correct/);
+  assert.match(texts[1], /list of every missing or incorrect item/);
+  assert.match(texts[1], /list is empty.*finish_draft/);
+  assert.match(texts[1], /Otherwise.*scene_render again/);
+  assert.equal(content.filter(part => part.type === 'image_url').length, 1);
+});
+
 test('multiple calls in one response wait for each preview before changing the scene again', async () => {
   const tools = host(), fake = simulatedServer({ approveAll: true });
   const base = new SceneStore().create({ scene_id: 'base' });
@@ -243,7 +275,11 @@ test('editor receives fresh snapshots and the reviewer retains its prior convers
     const content = users.at(-1)!.content;
     assert.ok(Array.isArray(content));
     const context = JSON.parse(content.find(part => part.type === 'text')!.text!);
+    const assessment = content.filter(part => part.type === 'text')[1]?.text;
     assert.equal(context.image_attached, true);
+    assert.match(assessment!, /submitted drawing/);
+    assert.match(assessment!, /A cave with a gate/);
+    assert.match(assessment!, /list is empty.*submit_review/);
     assert.deepEqual(content.filter(part => part.type === 'image_url').map(part => part.image_url!.url), [result.drafts[index].preview.image_ref]);
     assert.ok(users.slice(0, -1).every(message => typeof message.content === 'string'), 'Earlier review images are removed');
     assert.equal(context.draft.scene.revision, result.drafts[index].scene.revision);
