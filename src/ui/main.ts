@@ -28,7 +28,6 @@ app.innerHTML = `
         <label class="checkbox-row"><input type="checkbox" id="use-base"><span class="check-glyph" aria-hidden="true"></span>Edit the current scene</label>
         <label class="layer-row" for="layer-count">Number of layers (1-7)<input id="layer-count" type="number" min="1" max="7" step="1" value="1" aria-label="Number of layers" aria-describedby="layer-algorithm"></label>
         <p id="layer-algorithm" class="muted layer-algorithm" aria-live="polite"></p>
-        <button id="cancel-run" type="button" hidden>Cancel</button>
       </div>
     </section>
     <div class="canvas-column">
@@ -40,7 +39,7 @@ app.innerHTML = `
     <section class="panel monitor-panel" data-frame="double" data-title="MONITOR" aria-label="Monitor">
       <div class="panel-content">
         <section class="box" data-frame="single" data-title="Stats" aria-label="Stats">
-          <dl class="metrics"><div><dt>Tool calls</dt><dd>0</dd></div><div><dt>Successful calls</dt><dd>0</dd></div><div><dt>Failed calls</dt><dd>0</dd></div><div><dt>Retries</dt><dd>0</dd></div><div><dt>Avg. run time (s)</dt><dd>0.0</dd></div></dl>
+          <dl class="metrics"><div><dt>Tool calls</dt><dd>0</dd></div><div><dt>Successful calls</dt><dd>0</dd></div><div><dt>Failed calls</dt><dd>0</dd></div><div><dt>Retries</dt><dd>0</dd></div></dl>
         </section>
         <section class="box" data-frame="single" data-title="Real time log" aria-label="Real time log">
           <p id="activity-log" class="log-clamped" aria-live="polite">No tool calls yet.</p>

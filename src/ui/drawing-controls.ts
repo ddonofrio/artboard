@@ -7,11 +7,11 @@ import { AgentStatisticsLog } from './agent-statistics';
 
 const MODEL_STORAGE_KEY = 'artboard.selected-model';
 const REASONING_STORAGE_KEY = 'artboard.reasoning-effort';
+const CANCEL_REVEAL_DELAY_MS = 500;
 
 export function mountDrawingControls(app: HTMLElement): void {
   const prompt = app.querySelector<HTMLTextAreaElement>('#prompt')!;
   const send = app.querySelector<HTMLButtonElement>('.prompt-send')!;
-  const cancel = app.querySelector<HTMLButtonElement>('#cancel-run')!;
   const layers = app.querySelector<HTMLInputElement>('#layer-count')!;
   const batch = app.querySelector<HTMLInputElement>('#batch')!;
   const edit = app.querySelector<HTMLInputElement>('#use-base')!;
@@ -51,25 +51,26 @@ export function mountDrawingControls(app: HTMLElement): void {
   });
   window.addEventListener('pagehide', () => animation.dispose());
   let controller: AbortController | undefined;
+  let cancelAvailable = false;
+  let cancelRevealTimer: number | undefined;
   const discovery = new AbortController();
   window.addEventListener('pagehide', () => discovery.abort());
   let loadingModels = true;
   let modelError: string | undefined;
   let sceneId: string | undefined;
   let counts = [0, 0, 0, 0];
-  let totalDuration = 0, completed = 0;
+  let completed = 0;
   let batchPosition = '';
   let workflowLayers = 1;
   const refresh = () => {
-    send.disabled = !!controller || loadingModels || !model.value || !prompt.value.trim() || !Number.isInteger(Number(layers.value)) || Number(layers.value) < 1 || Number(layers.value) > 7 || !Number.isInteger(Number(imageDivisor.value)) || Number(imageDivisor.value) < 1 || Number(imageDivisor.value) > 64;
+    send.textContent = controller && cancelAvailable ? 'Cancel' : 'Send →';
+    send.disabled = controller ? !cancelAvailable : loadingModels || !model.value || !prompt.value.trim() || !Number.isInteger(Number(layers.value)) || Number(layers.value) < 1 || Number(layers.value) > 7 || !Number.isInteger(Number(imageDivisor.value)) || Number(imageDivisor.value) < 1 || Number(imageDivisor.value) > 64;
     for (const control of [prompt, layers, batch, edit, reasoning, imageDivisor]) control.disabled = !!controller;
     model.disabled = !!controller || loadingModels || !model.value;
     refreshModels.disabled = !!controller || loadingModels;
-    cancel.hidden = !controller;
   };
   const updateMetrics = () => {
     counts.forEach((value, index) => { metrics[index].textContent = String(value); });
-    metrics[4].textContent = (completed ? totalDuration / completed / 1000 : 0).toFixed(1);
   };
   const loadModels = async () => {
     loadingModels = true; refresh();
@@ -128,7 +129,7 @@ export function mountDrawingControls(app: HTMLElement): void {
       case 'retry': counts[3]++; reportError(event.message); updateMetrics(); break;
       case 'final':
         if (event.output_path) canvas.dataset.outputPath = event.output_path;
-        sceneId = event.scene_id; completed++; totalDuration += event.duration_ms; updateMetrics();
+        sceneId = event.scene_id; completed++;
         status.textContent = event.approved ? 'Approved' : event.stop_reason === 'unreviewed' ? 'Completed' : event.stop_reason === 'review_limit' ? 'Review limit reached' : 'Incomplete';
         if (event.error) reportError(event.error); break;
       case 'error': throw new Error(event.message);
@@ -139,9 +140,9 @@ export function mountDrawingControls(app: HTMLElement): void {
   layers.addEventListener('change', refresh);
   imageDivisor.addEventListener('input', refresh);
   imageDivisor.addEventListener('change', refresh);
-  cancel.addEventListener('click', () => controller?.abort());
   send.addEventListener('click', async () => {
-    if (controller || send.disabled) return;
+    if (controller) { if (cancelAvailable) controller.abort(); return; }
+    if (send.disabled) return;
     if (edit.checked && !sceneId) { status.textContent = 'Error'; reportError('Draw a scene before editing it.'); return; }
     const prompts = batch.checked ? prompt.value.split(/\r?\n/).map(value => value.trim()).filter(Boolean) : [prompt.value.trim()];
     const baseId = edit.checked ? sceneId : undefined;
@@ -149,9 +150,10 @@ export function mountDrawingControls(app: HTMLElement): void {
     const selectedReasoning = reasoning.value as ReasoningEffort | '';
     const selectedImageDivisor = Number(imageDivisor.value);
     const batchId = batch.checked ? crypto.randomUUID() : undefined;
-    const current = new AbortController(); controller = current;
+    const current = new AbortController(); controller = current; cancelAvailable = false;
+    cancelRevealTimer = window.setTimeout(() => { cancelAvailable = true; refresh(); }, CANCEL_REVEAL_DELAY_MS);
     statisticsLog.reset(); statistics.textContent = statisticsLog.text(); statistics.title = statistics.textContent;
-    counts = [0, 0, 0, 0]; totalDuration = 0; completed = 0; delete activity.dataset.lastError; agentState.textContent = 'processing prompt'; updateMetrics(); refresh();
+    counts = [0, 0, 0, 0]; completed = 0; delete activity.dataset.lastError; agentState.textContent = 'processing prompt'; updateMetrics(); refresh();
     try {
       for (const [index, text] of prompts.entries()) {
         current.signal.throwIfAborted();
@@ -167,7 +169,11 @@ export function mountDrawingControls(app: HTMLElement): void {
     } catch (error) {
       status.textContent = current.signal.aborted ? 'Cancelled' : 'Error';
       if (!current.signal.aborted) reportError(error instanceof Error ? error.message : String(error));
-    } finally { agentState.textContent = 'idle'; controller = undefined; refresh(); }
+    } finally {
+      if (cancelRevealTimer !== undefined) window.clearTimeout(cancelRevealTimer);
+      cancelRevealTimer = undefined; cancelAvailable = false;
+      agentState.textContent = 'idle'; controller = undefined; refresh();
+    }
   });
   refresh();
   void loadModels();

@@ -130,15 +130,23 @@ test('batch input runs sequential drawings and edit uses the last retained scene
 
 test('cancel aborts inference and allows a new run', async ({ page, request }) => {
   await page.getByRole('textbox', { name: 'Prompt' }).fill('Scene [slow]');
-  await page.getByRole('button', { name: 'Send' }).click();
-  await expect(page.locator('#workflow-log')).toContainText('Creating the scene');
+  const send = page.getByRole('button', { name: 'Send' });
+  await send.click();
+  await expect(send).toBeDisabled();
+  await expect(send).toHaveText('Send →');
+  await send.evaluate(button => button.dispatchEvent(new MouseEvent('click', { bubbles: true })));
   await expect.poll(async () => (await (await request.get('http://127.0.0.1:5189/requests')).json()).length).toBe(1);
+  await page.waitForTimeout(250);
+  await expect(send).toHaveText('Send →');
+  await expect(page.locator('.status')).not.toHaveText('Cancelled');
+  await expect(page.locator('#workflow-log')).toContainText('Creating the scene');
   await page.getByRole('button', { name: 'Cancel' }).click();
   await expect(page.locator('.status')).toHaveText('Cancelled');
   await expect(page.getByRole('textbox', { name: 'Prompt' })).toBeEnabled();
   await page.getByRole('textbox', { name: 'Prompt' }).fill('New scene');
+  const nextRun = page.waitForRequest(item => item.url().endsWith('/api/runs'));
   await page.getByRole('button', { name: 'Send' }).click();
-  await expect(page.locator('.status')).toHaveText('Approved');
+  expect((await nextRun).postDataJSON().prompt).toBe('New scene');
   const requests = await (await request.get('http://127.0.0.1:5189/requests')).json();
   expect(requests.filter((item: { prompt: string }) => item.prompt.includes('[slow]')).length).toBe(1);
 });

@@ -76,8 +76,8 @@ test('nested frames belong to their boxes and never cross title text', async ({ 
 });
 
 test('Stats are numerical and prompt and monitor fit their content', async ({ page }) => {
-  await expect(page.locator('.metrics dt')).toHaveText(['Tool calls', 'Successful calls', 'Failed calls', 'Retries', 'Avg. run time (s)']);
-  await expect(page.locator('.metrics dd')).toHaveText(['0', '0', '0', '0', '0.0']);
+  await expect(page.locator('.metrics dt')).toHaveText(['Tool calls', 'Successful calls', 'Failed calls', 'Retries']);
+  await expect(page.locator('.metrics dd')).toHaveText(['0', '0', '0', '0']);
 
   const dimensions = await page.evaluate(() => ({
     prompt: document.querySelector('.prompt-panel')!.getBoundingClientRect().height,
@@ -116,7 +116,7 @@ test('the local VGA font loads and canvas frame follows the image on resize', as
   }
 });
 
-test('Send is borderless on the bottom-right edge and changes from gray to white with text', async ({ page }) => {
+test('prompt action is borderless on the bottom-right edge and Send changes from gray to white with text', async ({ page }) => {
   const send = page.getByRole('button', { name: 'Send' });
   await expect(send).not.toHaveAttribute('data-frame');
   await expect(send).toHaveCSS('border-top-width', '0px');
