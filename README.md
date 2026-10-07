@@ -66,6 +66,15 @@ npm run dev
 
 Use Node.js 22.12 or newer. On Windows PowerShell, use `npm.cmd` if execution policy blocks `npm.ps1`. Startup creates a documented, Git-ignored `agents.local.json` if missing. No model connection is required to open the UI; Send requires an OpenAI-compatible model server. See [development setup](DEVELOPMENT.md) for configuration and the [browser interface](src/ui/README.md) for its controls.
 
+Local JavaScript drawing scripts can compose the same validated tools with loops and calculated geometry, without a model server:
+
+```sh
+npm run draw-script -- scripts/drawings/fighter-reference.mjs outputs/fighter-reference
+npm run draw-script -- scripts/drawings/fighter-reference.mjs outputs/fighter-reference reviewed
+```
+
+The reference study preserves a first attempt and a separate revision after visual review. Both use the existing primitives and fixed palette. See [drawing scripts](scripts/README.md) for the callable tools and execution contract.
+
 ## Structure
 
 ```text

@@ -35,6 +35,8 @@ Build creates the static browser application in `dist` and independent ESM libra
 
 `npm run cli -- outputs` reads JSON-lines drawing-tool requests from stdin and writes JSON-lines results to stdout. Its scene store lives for the duration of the process. File operations are scoped to the given output directory. This CLI is a local tool dispatcher, not an MCP server.
 
+`npm run draw-script -- <file.mjs> [output-directory] [arguments...]` explicitly executes a trusted local module with the drawing tools. It accepts the same named colors and geometry aliases as the agent. The host serializes calls, drains queued work, and stops after a tool failure while preserving previous successful batches. Output files remain adapter-scoped; the module itself runs with Node.js permissions. This command is separate from autonomous model execution. See [script authoring](scripts/README.md) for its contract and the reproducible fighter reference study.
+
 ## Drawing agents
 
 The fixed basic palette is shared by all workflows. Model context and drawing tools expose English color names; numeric indices and RGB values stay with rendering and persisted scene data. Agents cannot select or replace palettes. Tests exercise named colors through actual SDK requests, catalog discovery, inspection, edits and review, and verify that model requests contain no hexadecimal color codes.

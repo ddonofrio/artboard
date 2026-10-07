@@ -38,6 +38,7 @@
     "examples": "tsx scripts/examples.ts",
     "workflow": "tsx scripts/workflow.ts",
     "cli": "tsx scripts/cli.ts",
+    "draw-script": "tsx scripts/draw-script.ts",
     "agent": "tsx scripts/agent.ts"
   },
   "dependencies": {
