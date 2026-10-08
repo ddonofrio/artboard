@@ -12,7 +12,7 @@ class InlineAdapter extends NodeAdapter {
 const createTools = () => new SceneTools(new SceneStore(), new PixelRenderer(), new InlineAdapter());
 const profiles = Object.fromEntries(AGENT_ROLES.map(role => [role, { model: `${role}-model` }]));
 
-for (let layers = 2; layers <= 7; layers++) test(`workflow ${layers} preserves handoffs and reviews only with the final artist`, async () => {
+for (let layers = 3; layers <= 7; layers++) test(`workflow ${layers} preserves handoffs and reviews only with the final artist`, async () => {
   const fake = mockModel(), events: WorkflowEvent[] = [];
   const result = await runWorkflow({ layers, prompt: 'Scene [reject]', createTools, fetch: fake.fetcher,
     config: { agents: profiles }, onEvent: event => { events.push(event); },
@@ -36,8 +36,7 @@ for (let layers = 2; layers <= 7; layers++) test(`workflow ${layers} preserves h
     assert.ok(system.length < 1000, 'Role instructions stay compact');
     const stageRequests = fake.requests.filter(request => request.model === first.model && !request.tools.some(tool => tool.function.name === 'submit_review'));
     assert.ok(stageRequests.every(request => request.messages.find(message => message.role === 'system')!.content === system), 'System instructions stay stable through creation and corrections');
-    if (layers === 2) assert.deepEqual(context.workflow, { final: true });
-    else assert.equal(context.workflow!.history.length, index);
+    assert.equal(context.workflow!.history.length, index);
     if (index) {
       assert.ok(context.current_scene!.objects.length >= index);
       assert.equal(typeof first.messages.find(item => item.role === 'user')!.content, 'string');
@@ -47,6 +46,27 @@ for (let layers = 2; layers <= 7; layers++) test(`workflow ${layers} preserves h
   }
   assert.equal(events.filter(item => item.type === 'stage').length, layers - 1);
   assert.ok(events.filter(item => item.type === 'stage').every(item => item.total === layers));
+});
+
+test('workflow 2 hands the artist scene to an editable quality pass without a separate reviewer', async () => {
+  const fake = mockModel(), events: WorkflowEvent[] = [];
+  const result = await runWorkflow({ layers: 2, prompt: 'Scene', createTools, fetch: fake.fetcher,
+    config: { agents: profiles, connection: { vision: false } }, onEvent: event => { events.push(event); },
+  });
+  assert.equal(result.result.stop_reason, 'completed');
+  assert.equal(result.result.approved, false);
+  assert.equal(result.result.reviews.length, 0);
+  assert.deepEqual(result.stages.map(stage => stage.stage.name), ['Artist', 'Quality pass']);
+  assert.deepEqual(result.stages.map(stage => stage.result.draft.scene.objects.length), [1, 2]);
+  const second = fake.requests.find(request => request.model === 'integrator-model')!;
+  const context = requestContext(second);
+  assert.equal(context.workflow?.role, 'integrator');
+  assert.equal(context.workflow?.stage_index, 2);
+  assert.equal(context.current_scene?.objects.length, 1);
+  assert.equal(context.workflow?.previous && (context.workflow.previous as { stage?: string }).stage, 'artist');
+  assert.ok(fake.requests.every(request => !request.tools.some(tool => tool.function.name === 'submit_review')));
+  assert.match(describeLayerAlgorithm(2), /Artist.*Quality pass.*without another reviewer/);
+  assert.deepEqual(events.filter(event => event.type === 'stage').map(event => event.type === 'stage' ? [event.stage.name, event.index, event.total] : []), [['Artist', 1, 2], ['Quality pass', 2, 2]]);
 });
 
 test('undefined counts and invalid prompts make no model requests', async () => {
@@ -62,7 +82,7 @@ test('undefined counts and invalid prompts make no model requests', async () => 
 test('workflow 1 delivers an unreviewed drawing and never invokes a reviewer', async () => {
   const fake = mockModel(), events: WorkflowEvent[] = [];
   const workflow = await runWorkflow({ layers: 1, prompt: 'Scene [reject]', createTools, fetch: fake.fetcher,
-    config: { agents: profiles }, onEvent: item => { events.push(item); },
+    config: { agents: profiles, connection: { vision: false } }, onEvent: item => { events.push(item); },
   });
   assert.equal(workflow.result.stop_reason, 'unreviewed');
   assert.equal(workflow.result.approved, false);
@@ -72,7 +92,7 @@ test('workflow 1 delivers an unreviewed drawing and never invokes a reviewer', a
   assert.ok(!events.some(item => item.type === 'agent' && item.event.type === 'phase' && item.event.role === 'reviewer'));
   assert.ok(events.some(item => item.type === 'stage' && item.index === 1 && item.total === 1));
   assert.match(describeLayerAlgorithm(1), /without a reviewer/);
-  assert.match(describeLayerAlgorithm(2), /Artist.*Reviewer/);
+  assert.match(describeLayerAlgorithm(2), /Artist.*Quality pass/);
 });
 
 test('missing handoff fields are tool errors and recover without advancing the stage', async () => {
@@ -81,7 +101,7 @@ test('missing handoff fields are tool errors and recover without advancing the s
     config: { agents: profiles }, onEvent: event => { events.push(event); },
   });
   assert.equal(result.result.approved, true);
-  assert.equal(events.filter(item => item.type === 'agent' && item.event.type === 'tool' && !item.event.ok).length, 2);
+  assert.ok(events.filter(item => item.type === 'agent' && item.event.type === 'tool' && item.event.name === 'finish_draft' && !item.event.ok).length >= 2);
   assert.ok(result.stages.every(item => item.result.handoff));
 });
 
@@ -130,7 +150,7 @@ test('a reviewer cannot approve requirements still reported as pending by the fi
 test('model thinking is forwarded from reasoning fields and inline think tags', async () => {
   for (const format of ['reasoning_content', 'reasoning', 'tags']) {
     const fake = mockModel(), thoughts: string[] = [];
-    const result = await runWorkflow({ layers: 2, prompt: 'Scene', createTools, config: { agents: profiles },
+    const result = await runWorkflow({ layers: 3, prompt: 'Scene', createTools, config: { agents: profiles },
       fetch: async (input, init) => {
         const response = await fake.fetcher(input, init);
         const body = await response.json();

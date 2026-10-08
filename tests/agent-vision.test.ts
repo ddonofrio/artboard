@@ -3,15 +3,15 @@ import { test } from 'node:test';
 import { PixelRenderer, SceneStore, SceneTools, type PixelImage } from '../src/core/index';
 import { NodeAdapter, encodeJPEG } from '../src/adapters/node/index';
 import { runWorkflow, type WorkflowEvent } from '../src/workflows/run';
-import { mockModel, requestContext, sceneFromModel, type ChatRequest } from './fixtures/model';
+import { mockModel, requestContext, type ChatRequest } from './fixtures/model';
 
 class InlineAdapter extends NodeAdapter {
   async preview(image: PixelImage) { return `data:image/jpeg;base64,${encodeJPEG(image).toString('base64')}`; }
 }
 const createTools = () => new SceneTools(new SceneStore(), new PixelRenderer(), new InlineAdapter());
 
-for (const layers of [2, 4]) {
-  test(`reviewers receive each draft automatically and later looks remain on demand across ${layers} creation layers`, async () => {
+for (const layers of [3, 4]) {
+  test(`reviewers receive each draft automatically and later looks remain on demand across workflow ${layers}`, async () => {
     const fake = mockModel(), events: WorkflowEvent[] = [];
     const looks = new Map<string, number>();
     let requests = 0, imagesSeen = 0;
@@ -29,7 +29,10 @@ for (const layers of [2, 4]) {
         assert.equal(images.length, look === 2 || (reviewer && look === 0) ? 1 : 0, `request ${requests}: reviewers get their draft initially and other images require a successful render`);
         if (images.length) {
           imagesSeen++;
-          const expected = new PixelRenderer().render(sceneFromModel(scene!), look === 2 ? { crop: [0, 0, 8, 6], scale: 2 } : {});
+          const source = [...events].reverse().find(item => item.type === 'agent' && ((item.event.type === 'draft' && item.event.draft.scene.revision === scene!.revision) || (item.event.type === 'preview' && item.event.scene.revision === scene!.revision)));
+          assert.ok(source?.type === 'agent' && (source.event.type === 'draft' || source.event.type === 'preview'));
+          const actualScene = source.event.type === 'draft' ? source.event.draft.scene : source.event.scene;
+          const expected = new PixelRenderer().render(actualScene, look === 2 ? { crop: [0, 0, 8, 6], scale: 2 } : {});
           assert.equal(images[0].image_url!.url, `data:image/jpeg;base64,${encodeJPEG(expected).toString('base64')}`);
           if (look === 2) {
             const lastTool = request.messages.filter(message => message.role === 'tool').at(-1)!;
@@ -69,13 +72,15 @@ test('editing an existing scene starts without an image and JSON-only agents hav
   base.store.apply('base', [{ op: 'add', object: { id: 'base_background', kind: 'polygon', layer: -100, color: 1, points: [[0, 0], [64, 0], [64, 48], [0, 48]] } }]);
   for (const vision of [true, false]) {
     const fake = mockModel();
-    const result = await runWorkflow({ layers: 2, prompt: 'Edit the scene', initial_scene: base.store.get('base'), createTools,
+    const result = await runWorkflow({ layers: 3, prompt: 'Edit the scene', initial_scene: base.store.get('base'), createTools,
       config: { connection: { editor_model: 'test-model', vision } }, fetch: fake.fetcher,
     });
     assert.equal(result.result.approved, true);
     for (const request of fake.requests) {
       const reviewer = request.tools.some(tool => tool.function.name === 'submit_review');
-      assert.equal(JSON.stringify(request.messages).includes('data:image/'), vision && reviewer);
+      const image = JSON.stringify(request.messages).includes('data:image/');
+      const requestedByEditor = request.messages.some(message => message.role === 'tool' && typeof message.content === 'string' && message.content.includes('Requested image supplied once'));
+      assert.equal(image, vision && (reviewer || requestedByEditor));
       assert.equal(request.tools.some(tool => tool.function.name === 'scene_render'), vision);
     }
   }
@@ -84,7 +89,7 @@ test('editing an existing scene starts without an image and JSON-only agents hav
 test('an upstream rejection of the automatic reviewer image preserves the draft without retrying or disabling vision', async () => {
   const fake = mockModel();
   let reviewerRequests = 0;
-  const result = await runWorkflow({ layers: 2, prompt: 'A scene', createTools,
+  const result = await runWorkflow({ layers: 3, prompt: 'A scene', createTools,
     config: { connection: { editor_model: 'test-model' } }, fetch: async (input, init) => {
       const request = JSON.parse(String(init?.body)) as ChatRequest;
       if (!request.tools.some(tool => tool.function.name === 'submit_review')) return fake.fetcher(input, init);
@@ -97,6 +102,6 @@ test('an upstream rejection of the automatic reviewer image preserves the draft 
   assert.equal(result.result.stop_reason, 'incomplete');
   assert.equal(result.result.approved, false);
   assert.match(result.result.error!, /image inputs/);
-  assert.equal(result.result.draft.scene.objects.length, 1);
-  assert.equal(result.result.draft.scene.revision, 1);
+  assert.equal(result.result.draft.scene.objects.length, 2);
+  assert.equal(result.result.draft.scene.revision, 2);
 });

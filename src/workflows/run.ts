@@ -13,6 +13,7 @@ export interface WorkflowResult { result: AgentRunResult; stages: StageResult[] 
 export type WorkflowEvent = { type: 'stage'; stage: WorkflowStage; index: number; total: number } | { type: 'agent'; stage: WorkflowStage; event: AgentEvent };
 export interface WorkflowOptions {
   prompt: string; layers: number; config?: WorkflowConfig; initial_scene?: Scene; scene_id?: string;
+  max_steps?: number;
   createTools: () => SceneTools; fetch?: typeof fetch; signal?: AbortSignal;
   onEvent?: (event: WorkflowEvent) => void | Promise<void>;
 }
@@ -37,6 +38,7 @@ export async function runWorkflow(options: WorkflowOptions): Promise<WorkflowRes
       prompt: options.prompt, scene_id: options.scene_id, initial_scene: scene, tools: options.createTools(),
       config: { ...config, editor_model: profiles[stage.role]?.model || defaultModel, reviewer_model: reviewer },
       reviewer_instructions: profiles.reviewer?.instructions, fetch: options.fetch, signal: options.signal,
+      max_steps: options.max_steps,
       review: workflow.review,
       stage: { final, handoff: !singleArtist, instructions: singleArtist ? `${EDITOR_INSTRUCTIONS}${profiles[stage.role]?.instructions ? `\n${profiles[stage.role]!.instructions}` : ''}` : stageInstructions(stage, final, profiles[stage.role]?.instructions, workflow.review), context: singleArtist ? { final: true } : {
         stage_index: index + 1, role: stage.role, responsibility: stage.responsibility, final, review_enabled: workflow.review,
@@ -49,5 +51,6 @@ export async function runWorkflow(options: WorkflowOptions): Promise<WorkflowRes
     scene = result.draft.scene;
     if (result.stop_reason !== 'completed') return { result, stages: results };
   }
+  if (!workflow.review) return { result: results.at(-1)!.result, stages: results };
   throw new Error('Workflow ended without a final review.');
 }

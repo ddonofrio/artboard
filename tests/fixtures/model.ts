@@ -43,6 +43,8 @@ export function mockModel() {
     const id = `${role}_${context.round}`;
     let name: string, args: Record<string, unknown>;
     let extraCalls: { name: string; args: Record<string, unknown> }[] = [];
+    const lastToolMessage = [...request.messages].reverse().find(item => item.role === 'tool');
+    const needsImageCheck = typeof lastToolMessage?.content === 'string' && lastToolMessage.content.includes('has edits the model has not visually checked');
     if (reviewer) {
       const pending = context.round === 1 && request.messages.some(item => item.role === 'tool' && typeof item.content === 'string' && item.content.includes('final artist reports unresolved'));
       const approved = !pending && !context.prompt.includes('[limit]') && !(context.prompt.includes('[reject]') && context.round === 1);
@@ -63,10 +65,12 @@ export function mockModel() {
       if (context.prompt.includes('[paired-calls]')) extraCalls = [{ name: 'scene_apply', args: { scene_id: context.scene_id, operations: [
         { op: 'add', object: { id: `${id}_inner`, kind: 'polygon', points: [[16,12],[48,12],[48,36],[16,36]], color: 7, layer: layer + 1 } },
       ] } }];
+    } else if (needsImageCheck) {
+      name = 'scene_render'; args = { scene_id: context.scene_id };
     } else {
       name = 'finish_draft';
       const invalidBefore = request.messages.some(item => item.role === 'tool' && typeof item.content === 'string' && item.content.includes('Invalid finish_draft'));
-      args = { revision: scene.revision, done: [`${role} completed`], not_done: context.workflow?.final ? [] : [{ item: 'Remaining requested content', reason: 'Assigned to subsequent stages' }] };
+      args = { revision: scene.revision, ...(context.workflow ? { done: [`${role} completed`], not_done: context.workflow.final ? [] : [{ item: 'Remaining requested content', reason: 'Assigned to subsequent stages' }] } : {}) };
       if (context.prompt.includes('[pending]') && context.workflow?.final && context.round === 1) args.not_done = [{ item: 'Required subject detail', reason: 'Failed to draw it yet' }];
       if (context.prompt.includes('[invalid-handoff]') && !invalidBefore) delete args.not_done;
     }

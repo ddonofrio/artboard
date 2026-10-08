@@ -23,6 +23,10 @@ A new CLI invocation may create a new, empty scene. It is not a revision of the 
 
 For each iteration, keep the original prompt and settings. Give the agent the current scene and image, ask it to compare the image with the request, and let it choose a focused correction using the general tools. Render the result and compare it with the prior revision. Do not tell it which target-specific shapes or coordinates to add. Stop when changes no longer improve the requested result, a repeatable service limitation prevents a fair run, or the requested iteration budget is reached; report that limit rather than presenting a partial preview as a completed revision.
 
+For fast exploratory iterations, cap each artist pass at five tool steps with the CLI's `--max-steps 5`. This is temporary: omit the flag for the final run so normal uncapped behavior is restored. Do not lower the configured request timeout to make the test appear faster.
+
+**Golden rule for expensive inference:** launch the run, then wait for the process to finish without polling its logs, inspecting intermediate images, or issuing extra model prompts. Once it exits, inspect the saved output and run log together. This avoids spending prompts and attention while the model is still working.
+
 ## Example: `A house`
 
 Use the exact prompt `A house`, the selected first model, and the requested defaults. Save and inspect the first render only after the first-shot artifact is safely recorded. If the result is recognizable but sparse, or a later pass duplicates the roof and repeats analysis, diagnose those as general composition, scene-update, and action-selection problems. A suitable agent-level response is to make existing objects easy to update/remove by ID and to ask for one evidence-based correction before another render. Do not teach roof shape, window count, door placement, colors, or a fixed list of house parts.

@@ -14,12 +14,18 @@ const stages: Record<ArtistRole, WorkflowStage> = {
   integrator: { role: 'integrator', name: 'Final integrator', responsibility: 'Integrate all layers: lighting, color, shadows and finishing. Preserve their useful work and complete the original request.' },
 };
 const layouts: readonly ArtistRole[][] = [
-  ['artist'], ['artist'], ['background', 'main_content'], ['background', 'main_content', 'decorator'],
+  ['artist'], ['artist', 'integrator'], ['background', 'main_content'], ['background', 'main_content', 'decorator'],
   ['distant_background', 'setting', 'main_content', 'decorator'],
   ['distant_background', 'setting', 'main_content', 'foreground', 'decorator'],
   ['distant_background', 'setting', 'main_content', 'foreground', 'specialist', 'integrator'],
 ];
-export const WORKFLOWS: readonly WorkflowDefinition[] = layouts.map((roles, index) => ({ layers: index + 1, review: index > 0, stages: roles.map(role => stages[role]) }));
+export const WORKFLOWS: readonly WorkflowDefinition[] = layouts.map((roles, index) => ({
+  layers: index + 1,
+  review: index > 1,
+  stages: roles.map((role, stageIndex) => index === 1 && stageIndex === 1
+    ? { role, name: 'Quality pass', responsibility: 'Review the existing drawing against the original request. Preserve successful work and make one focused improvement only when the image shows a clear opportunity; otherwise hand off unchanged.' }
+    : stages[role]),
+}));
 export const AGENT_ROLES: readonly AgentRole[] = [...Object.keys(stages) as ArtistRole[], 'reviewer'];
 export function getWorkflow(layers: number): WorkflowDefinition {
   if (!Number.isInteger(layers) || layers < 1 || layers > WORKFLOWS.length) throw new Error('Choose a defined workflow from 1 to 7.');
@@ -28,6 +34,7 @@ export function getWorkflow(layers: number): WorkflowDefinition {
 export function describeLayerAlgorithm(layers: number): string {
   const workflow = WORKFLOWS.find(item => item.layers === layers);
   if (!workflow) return 'Algorithm: Not defined yet.';
-  if (!workflow.review) return 'Algorithm: Artist. Draw and inspect the complete scene, then deliver without a reviewer.';
+  if (workflow.layers === 1) return 'Algorithm: Artist. Draw and inspect the complete scene, then deliver without a reviewer.';
+  if (!workflow.review) return `Algorithm: ${workflow.stages.map(stage => stage.name).join(' → ')}. Each agent keeps the existing scene and completed or pending work; the final pass delivers the drawing without another reviewer.`;
   return `Algorithm: ${[...workflow.stages.map(stage => stage.name), 'Reviewer'].join(' → ')}. Each stage passes on completed and pending work. The ${workflow.stages.at(-1)!.name.toLowerCase()} handles review changes until approved or the review limit is reached.`;
 }

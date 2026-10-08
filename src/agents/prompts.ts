@@ -13,7 +13,7 @@ Call submit_review. Use existing object IDs, or scene for a missing element.`;
 export function imageAssessmentPrompt(prompt: string, role: 'editor' | 'reviewer'): string {
   const image = role === 'editor' ? 'what you have drawn' : 'the submitted drawing';
   const nextAction = role === 'editor'
-    ? 'Make at most one focused edit using existing object IDs where possible. Render once more only if you changed the drawing; otherwise call finish_draft now.'
+    ? 'If you have not yet made a visual correction in this pass, make at most one focused edit using existing object IDs where possible, then render once more. If you already made a correction, call finish_draft now.'
     : 'Call submit_review now: approve if the request is met, or return at most three concrete corrections.';
   return `The attached image is ${image}. User request: ${JSON.stringify(prompt)}. Compare the image with the request, briefly identify the most important visible mismatch, then act. ${nextAction}`;
 }

@@ -72,7 +72,7 @@ function misplacedObjectField(args: Record<string, unknown>): string | undefined
 }
 
 /** Thin SDK adapters around the existing tool dispatcher, not a second tool runtime. */
-export function agentTools(host: SceneTools, sceneId: string, role: 'editor' | 'reviewer', signal: AbortSignal | undefined, onTool: (name: string, result: ToolResult, input: Record<string, unknown>, appliedInput?: Record<string, unknown>) => void | Promise<void>, onDraft: (draft: DraftSubmission) => void, onReview: (review: Review) => void, submissionError: (revision: number) => string | undefined = () => undefined, requireHandoff = false, onStart: (name: string) => void | Promise<void> = () => {}, vision = true, reviewEnabled = true): ToolSet {
+export function agentTools(host: SceneTools, sceneId: string, role: 'editor' | 'reviewer', signal: AbortSignal | undefined, onTool: (name: string, result: ToolResult, input: Record<string, unknown>, appliedInput?: Record<string, unknown>) => void | Promise<void>, onDraft: (draft: DraftSubmission) => void, onReview: (review: Review) => void, submissionError: (revision: number) => string | undefined = () => undefined, requireHandoff = false, onStart: (name: string) => void | Promise<void> = () => {}, vision = true, reviewEnabled = true, beforeTool: (name: string) => string | undefined = () => undefined): ToolSet {
   const result: ToolSet = {};
   // Local models can return several calls despite parallel_tool_calls=false.
   // Serialize adapter executions, including presentation of each preview.
@@ -101,7 +101,9 @@ export function agentTools(host: SceneTools, sceneId: string, role: 'editor' | '
         signal?.throwIfAborted();
         let output: ToolResult;
         let appliedInput: Record<string, unknown> | undefined;
-        if (typeof args.scene_id === 'string' && /<\/?(?:parameter|function|tool_call)\b/.test(args.scene_id)) output = error(`Malformed tool arguments: XML tool tags are embedded in scene_id. Use one API function call with valid JSON arguments; scene_id must be exactly "${sceneId}". Do not place tool markup or another call inside a string.`);
+        const blocked = beforeTool(name);
+        if (blocked) output = error(`${blocked} Usage: ${toolUsage(name)}`);
+        else if (typeof args.scene_id === 'string' && /<\/?(?:parameter|function|tool_call)\b/.test(args.scene_id)) output = error(`Malformed tool arguments: XML tool tags are embedded in scene_id. Use one API function call with valid JSON arguments; scene_id must be exactly "${sceneId}". Do not place tool markup or another call inside a string.`);
         else if (args.scene_id !== undefined && args.scene_id !== sceneId) output = error(`Only scene_id ${sceneId} is available in this run. Retry ${name} with scene_id exactly "${sceneId}"; do not create or reference another scene ID.`);
         else if (name === 'scene_apply' && misplacedObjectField(args)) output = error(misplacedObjectField(args)!);
         else {

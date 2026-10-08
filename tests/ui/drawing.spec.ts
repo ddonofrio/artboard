@@ -7,7 +7,7 @@ test.beforeEach(async ({ page, request }) => {
   await page.locator('#layer-count').fill('2');
 });
 
-for (let layers = 2; layers <= 7; layers++) test(`workflow ${layers} renders a drawing and corrects only with the final artist`, async ({ page, request }) => {
+for (let layers = 3; layers <= 7; layers++) test(`workflow ${layers} renders a drawing and corrects only with the final artist`, async ({ page, request }) => {
   await page.locator('#layer-count').fill(String(layers));
   await expect(page.locator('#layer-algorithm')).toContainText('Reviewer');
   await page.getByRole('textbox', { name: 'Prompt' }).fill('Draw a landscape and a subject [reject]');
@@ -23,6 +23,15 @@ for (let layers = 2; layers <= 7; layers++) test(`workflow ${layers} renders a d
   expect(stages.size).toBe(layers - 1);
   expect(requests.filter((item: { workflow?: unknown; round: number }) => item.workflow && item.round === 2).every((item: { workflow: { stage_index?: number } }) => (item.workflow.stage_index ?? 1) === layers - 1)).toBe(true);
   await expect(page.locator('#agent-state')).toHaveText('idle');
+});
+
+test('workflow 2 runs an artist followed by an editable quality pass', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('#layer-count').fill('2');
+  await expect(page.locator('#layer-algorithm')).toContainText('Artist → Quality pass');
+  await page.locator('#prompt').fill('Scene');
+  await page.locator('#send').click();
+  await expect(page.locator('#status')).toContainText('Completed after 2 stages');
 });
 
 test('the model combo applies a selection to one Send operation and accepts a different model on the next turn', async ({ page, request }) => {

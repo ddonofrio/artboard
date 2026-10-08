@@ -10,13 +10,13 @@ class InlineAdapter extends NodeAdapter {
 }
 test('agent states describe an outstanding model request and tool execution before scene mutations', { timeout: 10000 }, async () => {
   const fake = mockModel(), events: WorkflowEvent[] = [];
-  const host = new SceneTools(new SceneStore(), new PixelRenderer(), new InlineAdapter());
+  let host = new SceneTools(new SceneStore(), new PixelRenderer(), new InlineAdapter());
   let release!: () => void, requested!: () => void;
   const gate = new Promise<void>(resolve => { release = resolve; });
   const started = new Promise<void>(resolve => { requested = resolve; });
   let first = true;
   const beforeTools: { name: string; objects: number | undefined }[] = [];
-  const running = runWorkflow({ prompt: 'Scene', layers: 2, createTools: () => host, config: { connection: { editor_model: 'test-model' } },
+  const running = runWorkflow({ prompt: 'Scene', layers: 3, createTools: () => { host = new SceneTools(new SceneStore(), new PixelRenderer(), new InlineAdapter()); return host; }, config: { connection: { editor_model: 'test-model' } },
     fetch: async (input, init) => { if (first) { first = false; requested(); await gate; } return fake.fetcher(input, init); },
     onEvent: item => {
       events.push(item);

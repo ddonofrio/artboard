@@ -37,7 +37,7 @@ test('HTTP reasoning and tool arguments arrive while the model response is still
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
   const deadline = setTimeout(() => { prefillGate.resolve(); argumentsGate.resolve(); finishGate.resolve(); }, 10000);
   try {
-    const response = await service.draw({ prompt: 'Scene', layers: 2 });
+    const response = await service.draw({ prompt: 'Scene', layers: 3 });
     reader = response.body!.getReader();
     const decoder = new TextDecoder(), items: DrawingEvent[] = [];
     let buffer = '';
@@ -109,7 +109,7 @@ test('vision JPGs reduce both dimensions per request while canvas previews and s
   try {
     for (const divisor of [4, 2, 1]) {
       const start = service.model.requests.length;
-      const items = events(await (await service.draw({ prompt: 'Scene', layers: 2, ...(divisor === 4 ? {} : { vision_image_divisor: divisor }) })).text());
+      const items = events(await (await service.draw({ prompt: 'Scene', layers: 3, ...(divisor === 4 ? {} : { vision_image_divisor: divisor }) })).text());
       const images = service.model.requests.slice(start).flatMap(request => request.messages.flatMap(message => Array.isArray(message.content) ? message.content.filter(part => part.type === 'image_url') : []));
       assert.ok(images.length > 0);
       for (const image of images) {
@@ -177,9 +177,9 @@ test('a selected model overrides every artist and reviewer only for its request 
 test('separate tool calls from one model response share a queue; the next response uses a new queue', async () => {
   const service = await startService();
   try {
-    const items = events(await (await service.draw({ prompt: 'Scene [paired-calls]', layers: 2 })).text());
+    const items = events(await (await service.draw({ prompt: 'Scene [paired-calls]', layers: 3 })).text());
     const indices = items.flatMap((item, index) => item.type === 'tool' && item.name === 'scene_apply' ? [index] : []);
-    assert.equal(indices.length, 2);
+    assert.equal(indices.length, 4);
     const first = items[indices[0] + 1], second = items[indices[1] + 1];
     assert.ok(first.type === 'preview' && second.type === 'preview');
     if (first.type !== 'preview' || second.type !== 'preview') return;
@@ -193,7 +193,7 @@ test('separate tool calls from one model response share a queue; the next respon
 test('service sends nested figures separately in one response queue with radial circle geometry', async () => {
   const service = await startService();
   try {
-    const items = events(await (await service.draw({ prompt: 'Scene [nested]', layers: 2 })).text());
+    const items = events(await (await service.draw({ prompt: 'Scene [nested]', layers: 3 })).text());
     const start = items.findIndex(item => item.type === 'tool' && item.name === 'scene_apply');
     const frames = items.slice(start + 1, start + 4);
     assert.ok(frames.every(item => item.type === 'preview'));
@@ -237,7 +237,7 @@ test('service streams stages, tools, images and reviews; saves and edits the ret
     assert.ok((await readFile(resolve(service.root, final.output_path!))).subarray(0, 2).equals(Buffer.from([255, 216])));
     const previews = items.filter(item => item.type === 'preview');
     assert.ok(previews.every(item => item.type === 'preview' && item.image.startsWith('data:image/png;')));
-    const edited = events(await (await service.draw({ prompt: 'Edit this scene', layers: 2, scene_id: final.scene_id })).text());
+    const edited = events(await (await service.draw({ prompt: 'Edit this scene', layers: 3, scene_id: final.scene_id })).text());
     const result = edited.at(-1)!;
     assert.ok(result.type === 'final' && result.approved && result.scene_id !== final.scene_id);
     if (result.type === 'final') {
@@ -252,7 +252,7 @@ test('service streams stages, tools, images and reviews; saves and edits the ret
 test('service forwards reasoning token usage separately from tool output tokens', async () => {
   const service = await startService();
   try {
-    const response = await service.draw({ prompt: 'Scene [thinking]', layers: 2 });
+    const response = await service.draw({ prompt: 'Scene [thinking]', layers: 3 });
     const thoughts = events(await response.text()).filter(item => item.type === 'thinking');
     assert.ok(thoughts.length > 0);
     assert.ok(thoughts.every(item => item.tokens === 512 && item.tokens_estimated === false));
@@ -279,7 +279,7 @@ test('model failures remain visible in the stream and incomplete drawings retain
     const final = items.at(-1)!;
     assert.ok(final.type === 'final' && final.stop_reason === 'incomplete' && !final.approved);
     if (final.type === 'final') assert.ok((await readdir(resolve(service.root, 'outputs', 'workflow', final.scene_id))).includes('background-draft-1.json'));
-    const failure = events(await (await service.draw({ prompt: '[fail]', layers: 2 })).text());
+    const failure = events(await (await service.draw({ prompt: '[fail]', layers: 3 })).text());
     assert.equal(failure.at(-1)!.type, 'error');
     assert.match(await readFile(resolve(service.root, 'outputs', 'logs', 'agent.jsonl'), 'utf8'), /"type":"error"/);
   } finally { await service.close(); }
@@ -290,7 +290,7 @@ test('service batch deliveries use the shared batch UUID and numbered JPG paths'
   const id = '01234567-89ab-4cde-8fab-0123456789ab';
   try {
     for (const index of [1, 2]) {
-      const items = events(await (await service.draw({ prompt: `Scene ${index}`, layers: 2, batch: { id, index } })).text());
+      const items = events(await (await service.draw({ prompt: `Scene ${index}`, layers: 3, batch: { id, index } })).text());
       const final = items.at(-1)!;
       assert.ok(final.type === 'final' && final.approved);
       if (final.type === 'final') assert.equal(final.output_path, `outputs/batch/${id}/${String(index).padStart(3, '0')}.jpg`);

@@ -2,6 +2,8 @@
 
 `npm run draw-script -- <file.mjs> [output-directory] [script arguments...]` explicitly runs a local JavaScript module. The output directory defaults to `outputs/scripts`. The module must export a default function accepting `(tools, args)`. Scripts can use JavaScript loops, functions and coordinate calculations. No model connection is required.
 
+`npm run agent -- [--layers 1-7] [--model ID] [--image-divisor 1-64] [--max-steps 1-50] <prompt>` runs the configured model workflow. `--max-steps` temporarily caps tool steps in each artist pass for quick experiments; omit it for the normal uncapped run. Image divisor defaults to the app configuration (4 unless overridden).
+
 ```js
 export default async function draw(tools) {
   const scene_id = 'study';
@@ -29,7 +31,7 @@ This command executes trusted local modules with ordinary Node.js permissions. I
 npm run agent -- --model ornith --layers 1 --image-divisor 4 "A house"
 ```
 
-The endpoint and optional API key come from the app's local configuration or environment. `--model` temporarily selects the same model for editor and reviewer roles; it does not change that configuration. Supported options are `--layers 1-7`, `--model ID`, `--image-divisor 1-64`, and `--reasoning-effort none|low|medium|high`. The prompt is required. This command does not discover models independently; it uses the configured connection.
+The endpoint and optional API key come from the app's local configuration or environment. `--model` temporarily selects the same model for editor and reviewer roles; it does not change that configuration. Supported options are `--layers 1-7`, `--model ID`, `--image-divisor 1-64`, `--max-steps 1-50`, and `--reasoning-effort none|low|medium|high`. The five-step cap is for quick exploratory runs; omit it to restore normal uncapped behavior. The prompt is required. This command does not discover models independently; it uses the configured connection.
 
 ## Fighter reference study
 

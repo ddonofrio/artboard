@@ -50,6 +50,8 @@ export interface AgentRunOptions {
   /** Isolated workflow stage; the original editor/reviewer loop remains the default. */
   stage?: { instructions: string; context: Record<string, unknown>; final: boolean; handoff?: boolean };
   reviewer_instructions?: string;
+  /** Optional per-editor-step ceiling, useful for short exploratory runs. */
+  max_steps?: number;
   review?: boolean;
   fetch?: typeof fetch;
   signal?: AbortSignal;
@@ -225,11 +227,16 @@ export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunRe
     }
     return deliver('incomplete', error instanceof Error ? error.message : String(error));
   };
-  let correctionApplied = false;
+  let correctionApplied = false, noVisibleCorrection = false, correctionUsed = false, correctedImageDelivered = false;
+  let correctedImageRevision: number | undefined, lastViewedRevision: number | undefined;
   const requestedImages: Record<'editor' | 'reviewer', AgentDraft['preview'][]> = { editor: [], reviewer: [] };
   const reportTool = (role: 'editor' | 'reviewer') => async (name: string, result: ToolResult, input: Record<string, unknown>, appliedInput?: Record<string, unknown>) => {
       const round = activeRound;
-      if (name === 'scene_render' && result.ok && config.vision) requestedImages[role].push({ image_ref: String(result.result.image_ref), revision: Number(result.result.revision) });
+      if (name === 'scene_render' && result.ok && config.vision) {
+        const preview = { image_ref: String(result.result.image_ref), revision: Number(result.result.revision) };
+        requestedImages[role].push(preview);
+        if (role === 'editor' && correctionUsed) correctedImageRevision = preview.revision;
+      }
       if (!result.ok) { rejectedTools++; lastToolError = result.error.message; }
       else if (name === 'scene_apply' || name === 'scene_history') edits++;
       // Every completed tool exposes the current drawing, including inspection
@@ -247,6 +254,10 @@ export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunRe
         }
         lastImage = image;
         if (role === 'editor' && result.ok && changedPixels > 0 && ['scene_apply', 'scene_history', 'scene_io'].includes(name)) correctionApplied = true;
+        if (role === 'editor' && name === 'scene_apply' && result.ok && lastViewedRevision === scene.revision - 1) {
+          correctionUsed = true;
+          if (changedPixels === 0) noVisibleCorrection = true;
+        }
         if (result.ok && ['scene_inspect', 'scene_apply', 'scene_history'].includes(name)) {
           result.result.changed_pixels = changedPixels;
           const ids = result.result.affected_ids;
@@ -296,21 +307,23 @@ export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunRe
     options.signal?.throwIfAborted();
     activeRole = 'editor'; activeRound = round;
     requestedImages.editor.length = 0;
-    phaseSteps = 0; edits = 0; rejectedTools = 0; lastToolError = ''; correctionApplied = false;
+    phaseSteps = 0; edits = 0; rejectedTools = 0; lastToolError = ''; correctionApplied = false; noVisibleCorrection = false;
+    correctionUsed = false; correctedImageDelivered = false; correctedImageRevision = undefined; lastViewedRevision = undefined;
     emit({ type: 'phase', role: 'editor', round });
     let submission: DraftSubmission | undefined;
     let preparedRevision: number | undefined;
-    let lastViewedRevision: number | undefined;
     const pendingReview = reviews.at(-1);
     const editorTools = agentTools(host, sceneId, 'editor', options.signal, reportTool('editor'), value => { submission = value; }, () => {}, revision => {
       if (config.vision && edits > 0 && lastViewedRevision !== revision) return `Revision ${revision} has edits the model has not visually checked. Call scene_render alone, inspect the image in the next response, and submit that unchanged revision.`;
       if (revision !== preparedRevision) return 'The drawing changed within this response. Check its updated JSON in the next model request, or call scene_render for visual inspection, before calling finish_draft alone. Complete every requested element before submitting.';
       if (pendingReview && (revision === pendingReview.revision || !correctionApplied)) return `The reviewer rejected revision ${pendingReview.revision}. Apply visible corrections with scene_apply before calling finish_draft. Pending corrections: ${JSON.stringify(pendingReview.issues)}`;
-    }, !!options.stage?.handoff, toolStarted('editor'), config.vision, options.review !== false);
+    }, !!options.stage?.handoff, toolStarted('editor'), config.vision, options.review !== false, name => {
+      if (name === 'scene_apply' && correctedImageDelivered) return 'This pass has already made and checked its one focused correction. Submit the current revision now.';
+    });
     const editor: DrawingAgent = {
       model: provider.chatModel(editorModel), instructions: editorBase,
       tools: editorTools, toolChoice: 'required', maxRetries: 0, maxOutputTokens: config.max_output_tokens,
-      timeout: { stepMs: config.timeout_ms }, stopWhen: () => submission !== undefined,
+      timeout: { stepMs: config.timeout_ms }, stopWhen: ({ steps }) => submission !== undefined || noVisibleCorrection || (correctedImageDelivered && steps.length > 0) || (options.max_steps !== undefined && steps.length >= options.max_steps),
       prepareStep: async ({ messages, initialMessages }) => {
         await emit({ type: 'state', role: 'editor', round, state: 'processing_prompt' });
         const recovery = loopDetectors.editor.prepareStep({ initialInstructions: editorBase, initialMessages });
@@ -323,7 +336,10 @@ export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunRe
           throw new Error('The prepared canvas is unavailable. Start a new drawing with a fresh scene host.');
         }
         const previews = requestedImages.editor.splice(0);
-        if (previews.length) lastViewedRevision = previews.at(-1)!.revision;
+        if (previews.length) {
+          lastViewedRevision = previews.at(-1)!.revision;
+          if (correctionUsed && previews.some(preview => preview.revision === correctedImageRevision)) correctedImageDelivered = true;
+        }
         const context = JSON.stringify(namedColors({ ...JSON.parse(text), current_scene: drawingScene(current), image_attached: previews.length > 0 }));
         const currentMessage = phaseMessages(context, previews, imageAssessmentPrompt(options.prompt, 'editor'))[0];
         // Append new state instead of rewriting the cached conversation prefix.
@@ -341,6 +357,8 @@ export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunRe
     while (!submission) {
       try {
         await consume(editor, phaseMessages(text));
+        if (!submission && (noVisibleCorrection || correctedImageDelivered)) submission = { revision: host.store.get(sceneId).revision };
+        if (!submission && options.max_steps !== undefined && phaseSteps >= options.max_steps) return incomplete(new Error(`Stopped after ${options.max_steps} editor tool steps.`), true);
       } catch (error) {
         options.signal?.throwIfAborted();
         if (!ToolChoiceViolationError.isInstance(error) || error.finishReason !== 'length') return incomplete(error);
@@ -375,6 +393,7 @@ export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunRe
     emit({ type: 'draft', round, draft: structuredClone(draft) });
 
     if (options.stage && !options.stage.final) return deliver('completed');
+    if (options.stage?.final && options.stage.handoff && options.review === false) return deliver('completed');
     if (options.review === false) return deliver('unreviewed');
 
     activeRole = 'reviewer';

@@ -21,7 +21,7 @@ test('CLI uses shared local configuration, selected stages and writes reviewed a
   if (!address || typeof address === 'string') throw new Error('Missing test server address');
   try {
     const output = resolve(directory, 'artifacts');
-    const result = await promisify(execFile)(process.execPath, ['--import', 'tsx', 'scripts/agent.ts', '--model', 'selected-model', '--image-divisor', '2', '--reasoning-effort', 'low', '--layers', '4', 'Scene [reject]'], {
+    const result = await promisify(execFile)(process.execPath, ['--import', 'tsx', 'scripts/agent.ts', '--model', 'selected-model', '--image-divisor', '2', '--max-steps', '5', '--reasoning-effort', 'low', '--layers', '4', 'Scene [reject]'], {
       env: { ...process.env, ARTBOARD_CONFIG_FILE: resolve(directory, 'agents.local.json'), AGENT_OUTPUT_DIR: output,
         AGENT_BASE_URL: `http://127.0.0.1:${address.port}`, AGENT_EDITOR_MODEL: 'configured-editor', AGENT_REVIEWER_MODEL: 'configured-reviewer', AGENT_MAX_REVIEWS: '2', AGENT_VISION: 'false', AGENT_SCENE: '' },
       timeout: 15000,

@@ -1,6 +1,5 @@
 /** Compact drawing instructions shared by the editor and workflow artists. */
-export const DRAWING_CYCLE = `Use the canvas dimensions and 16 named colors. Blank areas are white.
-Add shapes from back to front with scene_apply. New shapes appear over earlier ones.
-Use rect (x,y,width,height), circle (cx,cy,radius), ellipse (cx,cy,rx,ry), or polygon/line (points:[[x,y],...]). Use fill inside, stroke for outlines, and rotation in degrees.
-Check current_scene before editing. Keep existing objects: update or remove them by ID; add only distinct missing objects. Never redraw an existing object to change it.
-When vision is available, render once, fix the most important visible issue, then render once more if needed. Submit when the request is met.`;
+export const DRAWING_CYCLE = `Use the canvas and its 16 named colors; blank space is white. Draw back to front; new shapes cover earlier ones.
+Use rect (x,y,width,height), circle (cx,cy,radius), ellipse (cx,cy,rx,ry), or polygon/line (points:[[x,y],...]). Use fill, stroke, and rotation when useful.
+Keep existing objects: update or remove them by ID; add only distinct missing shapes.
+With vision, render the completed drawing, make at most one focused correction, render it, and submit. If the correction changes no visible pixels, submit immediately.`;

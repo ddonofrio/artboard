@@ -22,7 +22,7 @@ test('invalid or missing usage never substitutes total output tokens for thinkin
 for (const variant of ['details', 'top-level', 'zero', 'hidden', 'estimated']) test(`model thinking usage is ${variant} and scoped to each response`, async () => {
   const fake = mockModel(), thoughts: Extract<AgentEvent, { type: 'thinking' }>[] = [];
   const text = variant === 'hidden' ? '' : 'Plan the complete drawing block. '.repeat(400);
-  const result = await runWorkflow({ layers: 2, prompt: 'Scene', createTools, config: { connection: { editor_model: 'test-model' } },
+  const result = await runWorkflow({ layers: 3, prompt: 'Scene', createTools, config: { connection: { editor_model: 'test-model' } },
     fetch: async (input, init) => {
       const response = await fake.fetcher(input, init), body = await response.json();
       body.choices[0].message.reasoning_content = text;
