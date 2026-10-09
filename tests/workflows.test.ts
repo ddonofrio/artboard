@@ -58,6 +58,13 @@ test('workflow 2 hands the artist scene to an editable quality pass without a se
   assert.equal(result.result.reviews.length, 0);
   assert.deepEqual(result.stages.map(stage => stage.stage.name), ['Artist', 'Quality pass']);
   assert.deepEqual(result.stages.map(stage => stage.result.draft.scene.objects.length), [1, 2]);
+  const qualityPass = result.stages[1].stage.responsibility;
+  assert.match(qualityPass, /visible evidence, not your intentions/i);
+  assert.match(qualityPass, /not recognizable at a glance/i);
+  assert.match(qualityPass, /viewpoint, direction and coherent silhouette/i);
+  assert.match(qualityPass, /a few local high-contrast lines or details/i);
+  assert.match(qualityPass, /outline selectively/i);
+  assert.doesNotMatch(qualityPass, /\b(bird|animal|wings?|beak|feathers?|house|roof)\b/i);
   const second = fake.requests.find(request => request.model === 'integrator-model')!;
   const context = requestContext(second);
   assert.equal(context.workflow?.role, 'integrator');

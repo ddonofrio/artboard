@@ -23,7 +23,7 @@ export const WORKFLOWS: readonly WorkflowDefinition[] = layouts.map((roles, inde
   layers: index + 1,
   review: index > 1,
   stages: roles.map((role, stageIndex) => index === 1 && stageIndex === 1
-    ? { role, name: 'Quality pass', responsibility: 'Review the existing drawing against the original request. Preserve successful work and make one focused improvement only when the image shows a clear opportunity; otherwise hand off unchanged.' }
+    ? { role, name: 'Quality pass', responsibility: 'Compare the render with the request using visible evidence, not your intentions. If the primary subject is not recognizable at a glance, correct the largest structural mismatch. Preserve a clear viewpoint, direction and coherent silhouette; do not impose symmetry or replace the whole form. Once the shape reads clearly, add a few local high-contrast lines or details. Check scale, overlap and connectivity; outline selectively. Otherwise hand off unchanged.' }
     : stages[role]),
 }));
 export const AGENT_ROLES: readonly AgentRole[] = [...Object.keys(stages) as ArtistRole[], 'reviewer'];
