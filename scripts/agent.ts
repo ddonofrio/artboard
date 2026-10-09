@@ -74,6 +74,7 @@ try {
     const event = item.event;
     if (event.type === 'phase') console.log(`${event.role} ${event.round} (review limit ${config.connection!.max_reviews})`);
     if (event.type === 'tool') console.log(`  ${event.name}: ${event.ok ? 'ok' : event.message}`);
+    if (event.type === 'transport_error') console.error(`  transport ${event.role} r${event.round} request ${event.trace.request}: ${event.message}\n  trace: ${JSON.stringify(event.trace)}`);
     if (event.type === 'review') console.log(`  review r${event.review.revision}: ${event.review.approved ? 'approved' : event.review.issues.map(issue => issue.instruction).join('; ')}`);
   } });
   const result = workflow.result;

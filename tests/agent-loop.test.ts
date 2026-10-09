@@ -648,8 +648,15 @@ test('misplaced object colors return actionable feedback and recover before draf
 
 test('connection failures emit a transport error instead of disappearing from the run log', async () => {
   const events: AgentEvent[] = [];
-  await assert.rejects(() => runAgentLoop({ tools: host(), prompt: 'Background', config: { editor_model: 'vl' }, onEvent: event => events.push(event), fetch: async () => { throw new Error('Failed to fetch'); } }), /Failed to fetch/);
-  assert.ok(events.some(event => event.type === 'transport_error' && event.message === 'Failed to fetch' && event.role === 'editor'));
+  const cause = Object.assign(new Error('socket hang up'), { code: 'ECONNRESET' });
+  await assert.rejects(() => runAgentLoop({ tools: host(), prompt: 'Background', config: { editor_model: 'vl' }, onEvent: event => events.push(event), fetch: async () => { throw new Error('Failed to fetch', { cause }); } }), /Failed to fetch/);
+  const failure = events.find(event => event.type === 'transport_error');
+  assert.ok(failure?.type === 'transport_error' && failure.message === 'Failed to fetch' && failure.role === 'editor');
+  assert.equal(failure.trace.phase, 'request');
+  assert.equal(failure.trace.error.causes?.[0]?.code, 'ECONNRESET');
+  assert.ok(failure.trace.endpoint.startsWith('http'));
+  assert.ok(!failure.trace.endpoint.includes('?'));
+  assert.equal(events.filter(event => event.type === 'transport_error').length, 1);
 });
 
 test('successful model requests reset the timeout instead of exhausting a shared phase budget', async () => {
@@ -669,7 +676,11 @@ test('a model request that exceeds its own budget reports the request and durati
   await assert.rejects(() => runAgentLoop({ tools: host(), prompt: 'Background', config: { editor_model: 'vl', timeout_ms: 1000 }, onEvent: event => events.push(event), fetch: async (_input, init) => new Promise<Response>((_resolve, reject) => {
     init?.signal?.addEventListener('abort', () => reject(init.signal?.reason), { once: true });
   }) }), /Editor.*request 1.*timed out after 1 seconds/);
-  assert.ok(events.some(event => event.type === 'transport_error' && event.message.includes('request 1')));
+  const failure = events.find(event => event.type === 'transport_error');
+  assert.ok(failure?.type === 'transport_error' && failure.message.includes('request 1'));
+  assert.equal(failure.trace.phase, 'request');
+  assert.equal(failure.trace.timeout_ms, 1000);
+  assert.ok(failure.trace.elapsed_ms >= 900);
 });
 
 test('editor receives missing-background advice in actual tool messages; dark painted backgrounds count as covered', async () => {

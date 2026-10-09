@@ -11,6 +11,50 @@ import { drawingScene, namedColors } from './colors.js';
 
 export interface AgentDraft { scene: Scene; preview: { image_ref: string; revision: number } }
 type DrawingAgent = Omit<Parameters<typeof streamText<ToolSet>>[0], 'messages' | 'prompt'>;
+type TransportFailureTrace = {
+  phase: 'request' | 'response_stream';
+  request: number;
+  elapsed_ms: number;
+  timeout_ms: number;
+  endpoint: string;
+  request_signal: { aborted: boolean; reason?: string };
+  run_signal_aborted: boolean;
+  error: { name: string; message: string; code?: string; causes?: { name: string; message: string; code?: string }[] };
+};
+function safeEndpoint(input: RequestInfo | URL): string {
+  const value = input instanceof URL ? input.href : typeof input === 'string' ? input : input.url;
+  try { const url = new URL(value); return `${url.origin}${url.pathname}`; }
+  catch { return '<unknown endpoint>'; }
+}
+function errorTrace(error: unknown): TransportFailureTrace['error'] {
+  const describe = (value: unknown) => {
+    const item = value && typeof value === 'object' ? value as { name?: unknown; message?: unknown; code?: unknown; cause?: unknown } : undefined;
+    const message = value instanceof Error ? value.message : String(value);
+    const safeMessage = message.replace(/https?:\/\/[^\s"'<>]+/g, target => safeEndpoint(target));
+    const code = item?.code;
+    return { name: typeof item?.name === 'string' ? item.name : 'Error', message: safeMessage.slice(0, 1000), ...(typeof code === 'string' || typeof code === 'number' ? { code: String(code).slice(0, 100) } : {}) };
+  };
+  const primary = describe(error);
+  const causes: NonNullable<TransportFailureTrace['error']['causes']> = [];
+  let cause = error && typeof error === 'object' ? (error as { cause?: unknown }).cause : undefined;
+  for (let depth = 0; cause !== undefined && depth < 3; depth++) {
+    causes.push(describe(cause));
+    cause = cause && typeof cause === 'object' ? (cause as { cause?: unknown }).cause : undefined;
+  }
+  return { ...primary, ...(causes.length ? { causes } : {}) };
+}
+function abortReason(signal: AbortSignal | null | undefined): string | undefined {
+  if (!signal?.aborted) return undefined;
+  const reason = signal.reason;
+  if (reason instanceof Error) return `${reason.name}: ${reason.message}`.slice(0, 300);
+  return typeof reason === 'string' ? reason.slice(0, 300) : reason === undefined ? 'aborted' : Object.prototype.toString.call(reason);
+}
+function isTimeoutFailure(error: unknown, elapsedMs: number, timeoutMs: number): boolean {
+  for (let value = error, depth = 0; value !== undefined && depth < 4; depth++, value = value && typeof value === 'object' ? (value as { cause?: unknown }).cause : undefined) {
+    if (value instanceof Error && /timeout|timed out/i.test(`${value.name} ${value.message}`)) return true;
+  }
+  return elapsedMs >= timeoutMs;
+}
 /** Compatible servers can return a string error, an error object, or plain text. */
 function serverError(body: unknown, fallback: string): string {
   if (typeof body === 'string' && body.trim()) return body.trim().slice(0, 4000);
@@ -33,7 +77,7 @@ export type AgentEvent =
   | { type: 'prompt'; role: 'editor' | 'reviewer'; round: number; step: number; content: string }
   | { type: 'response'; role: 'editor' | 'reviewer'; round: number; status: number; finish_reason?: string; output_tokens?: number; text?: string; tool_calls?: unknown; error?: string }
   | { type: 'statistics'; role: 'editor' | 'reviewer'; round: number; model: string; duration_ms: number; usage: Record<string, number>; timings: Record<string, number> }
-  | { type: 'transport_error'; role: 'editor' | 'reviewer'; round: number; message: string }
+  | { type: 'transport_error'; role: 'editor' | 'reviewer'; round: number; message: string; trace: TransportFailureTrace }
   | { type: 'loop_detected'; role: 'editor' | 'reviewer'; round: number; detection: LoopDetection }
   | { type: 'phase'; role: 'editor' | 'reviewer'; round: number }
   | { type: 'tool'; role: 'editor' | 'reviewer'; round: number; call_id?: string; name: string; ok: boolean; revision?: number; message?: string; input: Record<string, unknown>; applied_input?: Record<string, unknown>; output: ToolResult }
@@ -106,6 +150,9 @@ export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunRe
   emit({ type: 'connection', base_url: config.base_url, models: { editor: editorModel, reviewer: reviewerModel } });
   let activeRole: 'editor' | 'reviewer' = 'editor', activeRound = 0;
   let requestNumber = 0;
+  let transportFailureReported = false;
+  let transportFailureMessage = '';
+  let activeRequestStarted = performance.now(), activeEndpoint = '<unknown endpoint>';
   const pendingCalls: { id: string; name: string; reported: boolean }[] = [];
   const fetcher: typeof fetch = async (input, init) => {
     const started = performance.now();
@@ -114,10 +161,14 @@ export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunRe
     let response: Response;
     try { response = await (options.fetch ?? globalThis.fetch)(input, init); }
     catch (error) {
-      const timedOut = !options.signal?.aborted && (init?.signal?.aborted || (error instanceof Error && /timeout|timed out/i.test(`${error.name} ${error.message}`)));
+      const elapsedMs = performance.now() - started;
+      const timedOut = !options.signal?.aborted && isTimeoutFailure(error, elapsedMs, config.timeout_ms);
       const duration = config.timeout_ms % 60000 === 0 ? `${config.timeout_ms / 60000} minutes` : `${config.timeout_ms / 1000} seconds`;
       const message = timedOut ? `${activeRole === 'editor' ? 'Editor' : 'Reviewer'} · request ${phaseSteps + 1}: timed out after ${duration} waiting for a model response.` : error instanceof Error ? error.message : String(error);
-      await emit({ type: 'transport_error', role: activeRole, round: activeRound, message });
+      const trace: TransportFailureTrace = { phase: 'request', request: requestNumber + 1, elapsed_ms: Math.round(elapsedMs), timeout_ms: config.timeout_ms, endpoint: safeEndpoint(input), request_signal: { aborted: Boolean(init?.signal?.aborted), ...(abortReason(init?.signal) ? { reason: abortReason(init?.signal) } : {}) }, run_signal_aborted: Boolean(options.signal?.aborted), error: errorTrace(error) };
+      transportFailureReported = true;
+      transportFailureMessage = message;
+      await emit({ type: 'transport_error', role: activeRole, round: activeRound, message, trace });
       if (timedOut) throw new Error(message, { cause: error });
       throw error;
     }
@@ -130,6 +181,8 @@ export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunRe
       return Response.json({ error: { message: `HTTP ${response.status} · ${activeRole === 'editor' ? 'Editor' : 'Reviewer'} · ${error}` } }, { status: response.status, statusText: response.statusText });
     }
     const request = ++requestNumber, role = activeRole, round = activeRound;
+    activeRequestStarted = started;
+    activeEndpoint = safeEndpoint(input);
     let generationState = 'processing_prompt', generationTool = '';
     pendingCalls.length = 0;
     return modelStream(response, async event => {
@@ -157,6 +210,7 @@ export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunRe
   };
   const provider = createOpenAICompatible({ name: 'local', baseURL: config.base_url, apiKey: config.api_key || undefined, fetch: fetcher, includeUsage: true, supportsStructuredOutputs: false, transformRequestBody: body => ({ ...body, parallel_tool_calls: false, ...(config.reasoning_effort ? { reasoning_effort: config.reasoning_effort } : {}) }) });
   const consume = async (agent: DrawingAgent, messages: ModelMessage[]) => {
+    transportFailureReported = false;
     const response = streamText({ ...agent, messages, abortSignal: options.signal, streamRetries: 0, onError: () => {} });
     try {
       let failure: unknown;
@@ -170,10 +224,18 @@ export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunRe
       // spent its output budget thinking without reaching a tool call. The
       // editor loop can recover with a fresh request and current canvas.
       if (ToolChoiceViolationError.isInstance(error)) throw error;
+      if (transportFailureReported) {
+        transportFailureReported = false;
+        const message = transportFailureMessage;
+        transportFailureMessage = '';
+        throw /timeout|timed out/i.test(message) ? new Error(message, { cause: error }) : error;
+      }
+      const elapsedMs = performance.now() - activeRequestStarted;
+      const timedOut = !options.signal?.aborted && isTimeoutFailure(error, elapsedMs, config.timeout_ms);
       const duration = config.timeout_ms % 60000 === 0 ? `${config.timeout_ms / 60000} minutes` : `${config.timeout_ms / 1000} seconds`;
-      const timedOut = error instanceof Error && /timeout|timed out/i.test(`${error.name} ${error.message}`);
       const message = timedOut ? `${activeRole === 'editor' ? 'Editor' : 'Reviewer'} · request ${phaseSteps + 1}: timed out after ${duration} waiting for a model response.` : error instanceof Error ? error.message : String(error);
-      await emit({ type: 'transport_error', role: activeRole, round: activeRound, message });
+      const trace: TransportFailureTrace = { phase: 'response_stream', request: requestNumber, elapsed_ms: Math.round(elapsedMs), timeout_ms: config.timeout_ms, endpoint: activeEndpoint, request_signal: { aborted: Boolean(options.signal?.aborted), ...(abortReason(options.signal) ? { reason: abortReason(options.signal) } : {}) }, run_signal_aborted: Boolean(options.signal?.aborted), error: errorTrace(error) };
+      await emit({ type: 'transport_error', role: activeRole, round: activeRound, message, trace });
       throw timedOut ? new Error(message, { cause: error }) : error;
     }
   };
